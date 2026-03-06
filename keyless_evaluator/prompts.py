@@ -1,7 +1,7 @@
 """Prompt templates for LLM evaluation."""
 
 from __future__ import annotations
-from oracle_search_evaluator.models import EvaluationRequest
+from keyless_evaluator.models import EvaluationRequest
 
 
 SYSTEM_PROMPT = """\
@@ -63,10 +63,3 @@ def build_user_prompt(req: EvaluationRequest) -> str:
     )
 
     return "\n".join(lines)
-
-
-def build_oracle_cli_prompt(req: EvaluationRequest) -> str:
-    """Single combined prompt suitable for piping into Oracle CLI."""
-    system = SYSTEM_PROMPT.replace('"', '\\"')
-    user = build_user_prompt(req)
-    return f"{SYSTEM_PROMPT}\n\n---\n\n{user}"

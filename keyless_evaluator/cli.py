@@ -1,4 +1,4 @@
-"""Typer CLI entry-point for oracle-search-evaluator."""
+"""Typer CLI entry-point for keyless-evaluator."""
 
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ import typer
 from dotenv import load_dotenv
 from rich.console import Console
 
-from oracle_search_evaluator.evaluators import PROVIDER_MAP, get_evaluator
-from oracle_search_evaluator.models import (
+from keyless_evaluator.evaluators import PROVIDER_MAP, get_evaluator
+from keyless_evaluator.models import (
     EvaluationRequest,
     SearchResult,
 )
-from oracle_search_evaluator.renderer import (
+from keyless_evaluator.renderer import (
     render_detail_panel,
     render_result_table,
     render_summary,
@@ -27,11 +27,12 @@ from oracle_search_evaluator.renderer import (
 load_dotenv()
 
 app = typer.Typer(
-    name="oracle-eval",
+    name="keyless-eval",
     help=(
-        "🔮 oracle-search-evaluator — LLM-as-judge search evaluation.\n\n"
+        "🔑 keyless-evaluator — LLM-as-judge search evaluation.\n\n"
         "Score search results 0–3 (Irrelevant → Highly Relevant) using LLM-as-judge.\n"
-        "Default: Oracle browser mode — uses your existing ChatGPT/Gemini login, no API key needed."
+        "Default: gemini — free 1500 req/day with GEMINI_API_KEY from aistudio.google.com.\n"
+        "No-key option: chatgpt_web — uses anonymous ChatGPT web session via browser."
     ),
     rich_markup_mode="rich",
 )
@@ -52,20 +53,12 @@ def cmd_eval(
         help="Path to JSON file with search results (array of {id, title, snippet?, url?, ...})"
     ),
     provider: str = typer.Option(
-        "oracle", "--provider", "-p",
-        help="LLM backend: oracle (default, browser mode = no API key), openai, gemini"
+        "gemini", "--provider", "-p",
+        help="LLM backend: gemini (default, free), chatgpt_web (no key), openai, anthropic"
     ),
     model: Optional[str] = typer.Option(
         None, "--model", "-m",
-        help="Model: gemini-2.0-flash (default), gpt-4o, gemini-3-pro, claude-4.5-sonnet, ..."
-    ),
-    engine: str = typer.Option(
-        "browser", "--engine", "-e",
-        help="[oracle] 'browser' = use your ChatGPT/Gemini web login (no key). 'api' = use API key."
-    ),
-    thinking: str = typer.Option(
-        "standard", "--thinking", "-t",
-        help="[oracle browser] Thinking depth: light | standard | extended | heavy"
+        help="Model override: gemini-2.0-flash (default), gpt-4o, claude-3-5-haiku-20241022, ..."
     ),
     detail: bool = typer.Option(
         False, "--detail", "-d",
@@ -81,41 +74,41 @@ def cmd_eval(
     ),
 ) -> None:
     """
-    Evaluate search results for a query using an LLM oracle.
+    Evaluate search results for a query using an LLM judge.
 
-    [bold]Default (no API key needed):[/bold]
-    Uses Oracle CLI in browser mode — drives your actual Gemini/ChatGPT web session.
-    Make sure you're logged into [cyan]gemini.google.com[/cyan] or [cyan]chatgpt.com[/cyan] in Chrome.
+    [bold]Quick start (free, no credit card):[/bold]
+    Set GEMINI_API_KEY from [cyan]aistudio.google.com[/cyan] (1500 free req/day), then:
+      keyless-eval eval -q "python async web framework" -f results.json
+
+    [bold]No account / no key:[/bold]
+    Use ChatGPT anonymous browser mode:
+      keyless-eval eval -q "your query" -f results.json -p chatgpt_web
 
     [bold]Examples:[/bold]
 
-      # ✨ Default: Oracle browser → Gemini web (no API key!)
-      oracle-eval eval -q "python async web framework" -f results.json
+      # Default: Gemini API (free quota, needs GEMINI_API_KEY)
+      keyless-eval eval -q "python async web framework" -f results.json
 
-      # Oracle browser → ChatGPT web (no API key!)
-      oracle-eval eval -q "best coffee in hanoi" -f results.json -m gpt-4o
+      # Anonymous ChatGPT web (no account/key!)
+      keyless-eval eval -q "best coffee in hanoi" -f results.json -p chatgpt_web
 
-      # Oracle browser → Gemini with extended thinking
-      oracle-eval eval -q "..." -f results.json -m gemini-3-pro --thinking extended
+      # OpenAI API
+      keyless-eval eval -q "..." -f results.json -p openai -m gpt-4o
 
-      # Fallback: Gemini API (needs GEMINI_API_KEY)
-      oracle-eval eval -q "..." -f results.json -p gemini -m gemini-2.0-flash
-
-      # Fallback: OpenAI API (needs OPENAI_API_KEY)
-      oracle-eval eval -q "..." -f results.json -p openai -m gpt-4o
+      # Anthropic Claude API
+      keyless-eval eval -q "..." -f results.json -p anthropic -m claude-opus-4-5
 
       # Save full JSON output with detail panels
-      oracle-eval eval -q "..." -f results.json --detail --output scored.json
+      keyless-eval eval -q "..." -f results.json --detail --output scored.json
     """
     # Load results
     if results_file is None:
-        # Try reading from stdin
         if not sys.stdin.isatty():
             raw = sys.stdin.read()
         else:
             err_console.print(
                 "[red]Error:[/red] Pass --file or pipe JSON results via stdin.\n"
-                "  Example: cat results.json | oracle-eval eval -q 'my query'"
+                "  Example: cat results.json | keyless-eval eval -q 'my query'"
             )
             raise typer.Exit(1)
     else:
@@ -123,7 +116,6 @@ def cmd_eval(
             err_console.print(
                 f"[red]File not found:[/red] {results_file}\n"
             )
-            # Look for any .json files nearby to suggest
             nearby = sorted(Path(".").glob("*.json"))
             if nearby:
                 err_console.print(
@@ -131,13 +123,13 @@ def cmd_eval(
                     + "  ".join(str(p) for p in nearby)
                 )
                 err_console.print(
-                    f"\n  Try: [bold]oracle-eval eval -q \"{query}\" -f {nearby[0]}[/bold]"
+                    f"\n  Try: [bold]keyless-eval eval -q \"{query}\" -f {nearby[0]}[/bold]"
                 )
             else:
                 err_console.print(
                     "[dim]No JSON files found in current directory.[/dim]\n"
-                    "  Generate an example: [bold]oracle-eval example[/bold]\n"
-                    "  Then run:            [bold]oracle-eval eval -q \"your query\" -f example_results.json[/bold]"
+                    "  Generate an example: [bold]keyless-eval example[/bold]\n"
+                    "  Then run:            [bold]keyless-eval eval -q \"your query\" -f example_results.json[/bold]"
                 )
             raise typer.Exit(1)
         raw = results_file.read_text(encoding="utf-8")
@@ -162,19 +154,11 @@ def cmd_eval(
         results=results,
     )
 
-    # Build evaluator
-    extra_kwargs: dict = {}
-    if provider == "oracle":
-        extra_kwargs["engine"] = engine
-        if thinking != "standard":
-            extra_kwargs["extra_args"] = ["--browser-thinking-time", thinking]
+    evaluator = get_evaluator(provider, model=model)
 
-    evaluator = get_evaluator(provider, model=model, **extra_kwargs)
-
-    # Describe the auth method to the user
     auth_note = (
-        "[green]browser session[/green] (no API key)"
-        if provider == "oracle" and engine == "browser"
+        "[dim]anonymous browser[/dim] (no key needed)"
+        if provider == "chatgpt_web"
         else "[yellow]API key[/yellow]"
     )
     console.print(
@@ -183,26 +167,18 @@ def cmd_eval(
         f"   Backend: [dim]{provider}/{evaluator.model}[/dim]  Auth: {auth_note}\n"
     )
 
-    if provider == "oracle" and engine == "browser":
-        console.print(
-            "[dim]  → Make sure you're logged into gemini.google.com or chatgpt.com in Chrome.[/dim]\n"
-        )
-
-    # Run
-    with console.status("[bold green]Asking the oracle...[/bold green]"):
+    with console.status("[bold green]Evaluating...[/bold green]"):
         try:
             response = asyncio.run(evaluator.evaluate(request))
         except Exception as exc:
             err_console.print(f"[red]Evaluation failed:[/red] {exc}")
             raise typer.Exit(1)
 
-    # Render
     render_result_table(response)
     if detail:
         render_detail_panel(response)
     render_summary(response)
 
-    # Save output
     if output_json:
         output_json.write_text(
             json.dumps(response.model_dump(mode="json"), indent=2, ensure_ascii=False),
@@ -212,7 +188,7 @@ def cmd_eval(
 
 
 # ---------------------------------------------------------------------------
-# detail command — show detail for a specific result
+# detail command
 # ---------------------------------------------------------------------------
 
 @app.command("detail")
@@ -221,7 +197,7 @@ def cmd_detail(
     index: int = typer.Argument(0, help="0-based index of the result to show detail for"),
 ) -> None:
     """Show detailed reasoning for a specific result from a saved evaluation."""
-    from oracle_search_evaluator.models import EvaluationResponse
+    from keyless_evaluator.models import EvaluationResponse
 
     data = json.loads(results_json.read_text(encoding="utf-8"))
     response = EvaluationResponse(**data)
@@ -234,7 +210,7 @@ def cmd_detail(
 
 
 # ---------------------------------------------------------------------------
-# example command — generate a sample input file
+# example command
 # ---------------------------------------------------------------------------
 
 @app.command("example")
@@ -277,10 +253,10 @@ def cmd_example(
     output.write_text(json.dumps(example, indent=2, ensure_ascii=False), encoding="utf-8")
     console.print(f"[green]Example results written to:[/green] {output}")
     console.print(
-        "\nEvaluate using your Gemini browser session (no API key):\n"
-        f"  [bold]oracle-eval eval -q \"python async web framework\" -f {output}[/bold]\n"
-        "\nOr with OpenAI API key:\n"
-        f"  [bold]oracle-eval eval -q \"python async web framework\" -f {output} -p openai[/bold]\n"
+        "\nEvaluate with Gemini free quota (set GEMINI_API_KEY first):\n"
+        f"  [bold]keyless-eval eval -q \"python async web framework\" -f {output}[/bold]\n"
+        "\nOr with no account/key (anonymous ChatGPT browser):\n"
+        f"  [bold]keyless-eval eval -q \"python async web framework\" -f {output} -p chatgpt_web[/bold]\n"
     )
 
 
@@ -302,23 +278,28 @@ def cmd_providers() -> None:
 
     rows = [
         (
-            "oracle [green](default)[/green]",
-            "gemini-2.0-flash",
-            "[green]None[/green] (browser mode)",
-            "Drives your real Gemini/ChatGPT web session via Chrome cookies. "
-            "Also accepts OPENAI/GEMINI/ANTHROPIC_API_KEY for --engine api.",
-        ),
-        (
-            "gemini",
+            "gemini [green](default)[/green]",
             "gemini-2.0-flash",
             "GEMINI_API_KEY",
-            "Direct Gemini API. Free quota via Google AI Studio.",
+            "Free 1500 req/day via Google AI Studio. Best default choice.",
+        ),
+        (
+            "chatgpt_web",
+            "auto",
+            "[green]None[/green] (anonymous)",
+            "Anonymous ChatGPT web via Playwright. No account or key needed.",
         ),
         (
             "openai",
             "gpt-4o",
             "OPENAI_API_KEY",
-            "Direct OpenAI API. Also works with gpt-4o-mini, o1, gpt-5, etc.",
+            "Direct OpenAI API. Works with gpt-4o, gpt-4o-mini, etc.",
+        ),
+        (
+            "anthropic",
+            "claude-3-5-haiku-20241022",
+            "ANTHROPIC_API_KEY",
+            "Anthropic Claude API. Great reasoning quality.",
         ),
     ]
 
@@ -328,17 +309,16 @@ def cmd_providers() -> None:
     console.print("\n[bold]Available Providers[/bold]\n")
     console.print(table)
     console.print(
-        "\n[bold green]Browser mode (recommended, no API key):[/bold green]\n"
-        "  1. Log into [cyan]gemini.google.com[/cyan] or [cyan]chatgpt.com[/cyan] in Chrome\n"
-        "  2. Run: [bold]oracle-eval eval -q \"your query\" -f results.json[/bold]\n"
-        "     (Oracle CLI opens Chrome automatically and uses your session)\n"
-        "\n[bold yellow]Troubleshooting macOS Cookie Errors (missing __Secure-1PSID):[/bold yellow]\n"
-        "  If macOS blocks cookie decryption, use ChatGPT with browser-manual-login:\n"
-        "  [bold]oracle-eval eval -q \"query\" -f results.json -m gpt-4o[/bold]\n"
-        "  This will open a Chrome window and reuse your active ChatGPT session.\n"
-        "\n[dim]Optional API key fallback — add to .env:[/dim]\n"
-        "  OPENAI_API_KEY=sk-...    # for -p openai or -p oracle -e api -m gpt-4o\n"
-        "  GEMINI_API_KEY=AI...     # for -p gemini\n"
+        "\n[bold green]Free & easy (recommended):[/bold green]\n"
+        "  1. Get a free GEMINI_API_KEY at [cyan]aistudio.google.com[/cyan]\n"
+        "  2. Add to .env: [bold]GEMINI_API_KEY=AI...[/bold]\n"
+        "  3. Run: [bold]keyless-eval eval -q \"your query\" -f results.json[/bold]\n"
+        "\n[bold yellow]No account, no key — ChatGPT anonymous browser:[/bold yellow]\n"
+        "  [bold]keyless-eval eval -q \"query\" -f results.json -p chatgpt_web[/bold]\n"
+        "  (Opens a Chrome window automatically)\n"
+        "\n[dim]Optional — add to .env:[/dim]\n"
+        "  OPENAI_API_KEY=sk-...    # for -p openai\n"
+        "  ANTHROPIC_API_KEY=sk-ant-...  # for -p anthropic\n"
     )
 
 
@@ -351,7 +331,7 @@ def cmd_serve(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="API server host address"),
     port: int = typer.Option(8000, "--port", "-p", help="API server port"),
 ) -> None:
-    """Start the FastAPI server to evaluate results over HTTP (uses ChatGPT browser mode)."""
+    """Start the FastAPI HTTP server (for integrating as a microservice)."""
     try:
         import uvicorn
     except ImportError as e:
@@ -359,13 +339,13 @@ def cmd_serve(
         raise typer.Exit(1) from e
 
     console.print(
-        f"\n[bold green]Starting Oracle Web API[/bold green] on [cyan]ttp://{host}:{port}[/cyan]\n"
+        f"\n[bold green]Starting Keyless Evaluator API[/bold green] on [cyan]http://{host}:{port}[/cyan]\n"
         "  [dim]• Endpoint: POST /v1/evaluate[/dim]\n"
         "  [dim]• Docs:     http://127.0.0.1:8000/docs[/dim]\n"
-        "  [dim]• Backend:  ChatGPT Browser Automation (opens Chrome under the hood)[/dim]\n"
+        "  [dim]• Health:   http://127.0.0.1:8000/health[/dim]\n"
     )
 
-    uvicorn.run("oracle_search_evaluator.server:app", host=host, port=port, reload=False)
+    uvicorn.run("keyless_evaluator.server:app", host=host, port=port, reload=False)
 
 
 def main() -> None:

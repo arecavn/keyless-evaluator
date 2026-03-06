@@ -6,3 +6,9 @@ dist/
 *.egg-info/
 .DS_Store
 *.json.bak
+
+# Legacy package — only __pycache__ left, sandbox-protected files
+oracle_search_evaluator/
+
+# Vercel build output
+.vercel/

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 
-from oracle_search_evaluator.models import RelevanceScore, ResultScore, SearchResult
+from keyless_evaluator.models import RelevanceScore, ResultScore, SearchResult
 
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)

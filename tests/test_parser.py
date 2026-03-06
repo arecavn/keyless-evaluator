@@ -1,8 +1,8 @@
 """Tests for the LLM response parser."""
 
 import pytest
-from oracle_search_evaluator.models import RelevanceScore, SearchResult
-from oracle_search_evaluator.parser import parse_evaluation_response
+from keyless_evaluator.models import RelevanceScore, SearchResult
+from keyless_evaluator.parser import parse_evaluation_response
 
 
 SAMPLE_RESULTS = [
@@ -61,8 +61,8 @@ def test_invalid_json_raises():
 
 
 def test_ndcg_computed():
-    from oracle_search_evaluator.evaluators import _compute_ndcg
-    from oracle_search_evaluator.models import ResultScore
+    from keyless_evaluator.evaluators import _compute_ndcg
+    from keyless_evaluator.models import ResultScore
 
     scores = [
         ResultScore(result_id="r1", title="A", score=RelevanceScore(3),
