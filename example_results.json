@@ -1,0 +1,43 @@
+{
+  "results": [
+    {
+      "id": "result_001",
+      "title": "FastAPI — Modern, fast web framework for building APIs",
+      "snippet": "FastAPI is a modern, fast (high-performance), web framework for building APIs with Python 3.8+ based on standard Python type hints.",
+      "url": "https://fastapi.tiangolo.com/",
+      "metadata": {
+        "category": "web-framework",
+        "language": "Python"
+      }
+    },
+    {
+      "id": "result_002",
+      "title": "Django REST Framework",
+      "snippet": "Django REST framework is a powerful and flexible toolkit for building Web APIs in Django.",
+      "url": "https://www.django-rest-framework.org/",
+      "metadata": {
+        "category": "web-framework",
+        "language": "Python"
+      }
+    },
+    {
+      "id": "result_003",
+      "title": "Node.js Express Framework",
+      "snippet": "Express is a minimal and flexible Node.js web application framework.",
+      "url": "https://expressjs.com/",
+      "metadata": {
+        "category": "web-framework",
+        "language": "JavaScript"
+      }
+    },
+    {
+      "id": "result_004",
+      "title": "Best Python Chili Recipe",
+      "snippet": "A delicious and hearty chili recipe using fresh ingredients.",
+      "url": "https://cooking.example.com/chili",
+      "metadata": {
+        "category": "food"
+      }
+    }
+  ]
+}
