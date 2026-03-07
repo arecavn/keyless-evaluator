@@ -19,9 +19,9 @@ from typing import Annotated
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from keyless_evaluator.adapter import adapt_raw_input
-from keyless_evaluator.evaluators import PROVIDER_MAP, get_evaluator
-from keyless_evaluator.models import EvaluationRequest, EvaluationResponse, RawEvaluationRequest
+from adapter import adapt_raw_input
+from evaluators import PROVIDER_MAP, get_evaluator
+from models import EvaluationRequest, EvaluationResponse, RawEvaluationRequest
 
 
 def create_app() -> FastAPI:

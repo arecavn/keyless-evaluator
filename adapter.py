@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from keyless_evaluator.models import FieldMapping, SearchResult
+from models import FieldMapping, SearchResult
 
 
 # ---------------------------------------------------------------------------

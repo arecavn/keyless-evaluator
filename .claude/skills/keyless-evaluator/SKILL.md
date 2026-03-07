@@ -24,7 +24,9 @@ uv run keyless-eval eval -q "query" -f results.json -p anthropic
 uv run keyless-eval providers
 
 # HTTP server
-uv run keyless-eval serve   # → http://127.0.0.1:8000  docs: /docs
+uv run main.py              # → http://127.0.0.1:8000  docs: /docs
+uv run main.py --host 0.0.0.0 --port 8080   # custom bind
+uv run main.py --reload                       # dev mode
 
 # Tests
 uv run pytest tests/ -v

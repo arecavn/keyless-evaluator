@@ -9,7 +9,7 @@ from rich.table import Table
 from rich.text import Text
 from rich import print as rprint
 
-from keyless_evaluator.models import EvaluationResponse, RelevanceScore
+from models import EvaluationResponse, RelevanceScore
 
 console = Console()
 

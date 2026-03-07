@@ -109,9 +109,12 @@ uv run keyless-eval providers   # see full table with notes
 Start the HTTP server and integrate with any service:
 
 ```bash
-uv run keyless-eval serve
+uv run main.py
 # → http://127.0.0.1:8000
 # → Docs: http://127.0.0.1:8000/docs
+
+uv run main.py --host 0.0.0.0 --port 8080   # custom bind
+uv run main.py --reload                       # dev mode
 ```
 
 ### Standard input (structured results list)
@@ -235,7 +238,7 @@ keyless-eval eval        Evaluate search results (main command)
 keyless-eval detail      Show detailed reasoning for a saved result
 keyless-eval example     Generate a sample results.json
 keyless-eval providers   List available LLM providers
-keyless-eval serve       Start the FastAPI HTTP server
+keyless-eval serve       Start the FastAPI HTTP server (or: uv run main.py)
 ```
 
 ### `eval` options
@@ -295,7 +298,7 @@ vercel deploy --prod
 ```bash
 uv sync                          # install deps
 uv run pytest tests/ -v         # run tests
-uv run keyless-eval serve        # start local server
+uv run main.py                   # start local server
 ```
 
 > **macOS note**: If `.venv` creation fails (sandbox restriction), set:

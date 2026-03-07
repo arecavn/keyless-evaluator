@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "keyless_evaluator/server.py",
+      "src": "server.py",
       "use": "@vercel/python",
       "config": {
         "maxLambdaSize": "50mb",
@@ -13,7 +13,7 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "keyless_evaluator/server.py"
+      "dest": "server.py"
     }
   ],
   "env": {
@@ -59,7 +59,7 @@
     }
   ],
   "functions": {
-    "keyless_evaluator/server.py": {
+    "server.py": {
       "maxDuration": 60,
       "memory": 512
     }

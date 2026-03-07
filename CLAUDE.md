@@ -21,7 +21,9 @@ uv run keyless-eval providers
 uv run keyless-eval example
 
 # Start HTTP API server
-uv run keyless-eval serve
+uv run main.py
+uv run main.py --host 0.0.0.0 --port 8080   # custom bind
+uv run main.py --reload                       # dev mode
 
 # Run tests
 uv run pytest tests/ -v

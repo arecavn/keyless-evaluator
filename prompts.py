@@ -1,7 +1,7 @@
 """Prompt templates for LLM evaluation."""
 
 from __future__ import annotations
-from keyless_evaluator.models import EvaluationRequest
+from models import EvaluationRequest
 
 
 SYSTEM_PROMPT = """\

@@ -105,7 +105,7 @@ class ResultScore(BaseModel):
     score: RelevanceScore
     reason_summary: str = Field(description="One-sentence summary of why this score was given")
     reason_detail: str = Field(description="Detailed explanation of the relevance judgment")
-    raw_response: str | None = Field(default=None, description="Raw LLM output for this item")
+    raw_response: str | None = Field(default=None, exclude=True, description="Raw LLM output (not serialized; written to logs/llm.log)")
 
 
 class EvaluationRequest(BaseModel):

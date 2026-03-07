@@ -3,20 +3,43 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import os
 from abc import ABC, abstractmethod
 
-from keyless_evaluator.models import (
+from models import (
     EvaluationRequest,
     EvaluationResponse,
     ResultScore,
 )
-from keyless_evaluator.parser import parse_evaluation_response
-from keyless_evaluator.prompts import (
+from parser import parse_evaluation_response
+from prompts import (
     SYSTEM_PROMPT,
     build_user_prompt,
 )
+
+
+# ---------------------------------------------------------------------------
+# LLM response logger — writes raw output to logs/llm.log for tracing
+# ---------------------------------------------------------------------------
+
+_llm_logger = logging.getLogger("keyless_evaluator.llm")
+_llm_logger_ready = False
+
+
+def _ensure_llm_logger() -> None:
+    global _llm_logger_ready
+    if _llm_logger_ready:
+        return
+    log_dir = os.path.join(os.getcwd(), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    handler = logging.FileHandler(os.path.join(log_dir, "llm.log"), encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    _llm_logger.addHandler(handler)
+    _llm_logger.setLevel(logging.INFO)
+    _llm_logger.propagate = False
+    _llm_logger_ready = True
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +83,7 @@ class BaseEvaluator(ABC):
         scores: list[ResultScore],
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
+        raw_llm_response: str | None = None,
     ) -> EvaluationResponse:
         resp = EvaluationResponse(
             query=request.query,
@@ -70,6 +94,21 @@ class BaseEvaluator(ABC):
             completion_tokens=completion_tokens,
         )
         resp.ndcg = _compute_ndcg(scores)
+
+        if raw_llm_response is not None:
+            _ensure_llm_logger()
+            _llm_logger.info(
+                "provider=%s model=%s tokens=%s/%s query=%r\n%s\n%s\n%s",
+                self.provider,
+                self.model,
+                prompt_tokens,
+                completion_tokens,
+                request.query,
+                "--- RAW LLM RESPONSE ---",
+                raw_llm_response,
+                "--- END ---",
+            )
+
         return resp
 
 
@@ -117,6 +156,7 @@ class OpenAIEvaluator(BaseEvaluator):
             scores,
             prompt_tokens=usage.prompt_tokens if usage else None,
             completion_tokens=usage.completion_tokens if usage else None,
+            raw_llm_response=raw,
         )
 
 
@@ -168,6 +208,7 @@ class GeminiEvaluator(BaseEvaluator):
             scores,
             prompt_tokens=getattr(usage, "prompt_token_count", None) if usage else None,
             completion_tokens=getattr(usage, "candidates_token_count", None) if usage else None,
+            raw_llm_response=raw,
         )
 
 
@@ -182,41 +223,36 @@ _STEALTH_SCRIPT = """
 // 1. Hide webdriver flag — the most obvious headless tell
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 
-// 2. Realistic language + platform
+// 2. Patch userAgent — headless Chrome includes 'HeadlessChrome', Cloudflare checks this
+const _realUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+Object.defineProperty(navigator, 'userAgent',  {get: () => _realUA});
+Object.defineProperty(navigator, 'appVersion', {get: () => _realUA.replace('Mozilla/', '')});
+
+// 3. Realistic language + platform
 Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-Object.defineProperty(navigator, 'platform', {get: () => 'MacIntel'});
+Object.defineProperty(navigator, 'platform',  {get: () => 'MacIntel'});
 
-// 3. Fake plugin list — headless has 0 plugins
-Object.defineProperty(navigator, 'plugins', {
-  get: () => {
-    const arr = [
-      {name:'Chrome PDF Plugin', filename:'internal-pdf-viewer'},
-      {name:'Chrome PDF Viewer', filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai'},
-      {name:'Native Client', filename:'internal-nacl-plugin'},
-    ];
-    arr.__proto__ = PluginArray.prototype;
-    return arr;
-  }
-});
+// 4. Hardware / memory hints
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+Object.defineProperty(navigator, 'deviceMemory',        {get: () => 8});
 
-// 4. Fake chrome runtime object — missing in headless
+// 5. Fake chrome runtime object — missing in headless
 window.chrome = window.chrome || {};
 window.chrome.runtime = window.chrome.runtime || {};
+window.chrome.loadTimes = function(){};
+window.chrome.csi = function(){};
 
-// 5. Permissions API — headless returns 'denied' for notifications, real browser returns 'default'
+// 6. Permissions API — headless returns 'denied' for notifications
 const _origPerms = navigator.permissions.query.bind(navigator.permissions);
 navigator.permissions.query = (p) =>
   p.name === 'notifications'
     ? Promise.resolve({state: 'default', onchange: null})
     : _origPerms(p);
 
-// 6. Remove Automation-related CSS media feature
-Object.defineProperty(window, 'outerWidth',  {get: () => 1280});
-Object.defineProperty(window, 'outerHeight', {get: () => 800});
-Object.defineProperty(window, 'innerWidth',  {get: () => 1280});
-Object.defineProperty(window, 'innerHeight', {get: () => 800});
-Object.defineProperty(screen, 'width',       {get: () => 1280});
-Object.defineProperty(screen, 'height',      {get: () => 800});
+// NOTE: Do NOT override navigator.plugins or window/screen dimensions.
+// The PluginArray prototype mutation breaks ChatGPT's React streaming renderer,
+// causing the assistant response container to appear in the DOM with empty text.
+// Window dimension overrides similarly interfere with React's layout calculations.
 """
 
 _STEALTH_ARGS = [
@@ -243,24 +279,15 @@ class ChatGPTWebEvaluator(BaseEvaluator):
     """
     Evaluate using ChatGPT's public anonymous web interface via Playwright.
 
-    **Silent by default** — runs Chrome in headless mode using a 3-tier strategy
-    to bypass Cloudflare and ChatGPT bot detection without showing any window:
+    **Headless by default with full stealth** — runs Chrome in headless mode
+    while masking all common bot-detection fingerprints used by Cloudflare/ChatGPT:
+    - navigator.userAgent patched to remove "HeadlessChrome"
+    - navigator.webdriver hidden
+    - Realistic plugins, hardwareConcurrency, deviceMemory, screen dimensions
+    - chrome.runtime, chrome.loadTimes, chrome.csi present
+    - Permissions API returns 'default' for notifications
 
-    Tier 1 (default): Real Chrome install + headless=True + full stealth patches.
-      Chrome's "new headless" mode (since v112) shares the same rendering engine
-      as headed mode, making it the hardest to fingerprint.
-
-    Tier 2: Bundled Playwright Chromium + headless=True + stealth patches.
-      Works when Chrome is not installed (e.g. CI, Docker).
-
-    Tier 3 (fallback): headless=False — visible window. Only used when both
-      headless tiers are detected and blocked by Cloudflare.
-
-    The stealth script patches: navigator.webdriver, navigator.plugins,
-    navigator.languages, chrome.runtime, permissions API, screen/window dimensions.
-
-    No account, no API key, no cookies required. Completely anonymous.
-    Set env var CHATGPT_WEB_HEADLESS=0 to force visible mode.
+    Set CHATGPT_WEB_HEADLESS=0 to force a visible Chrome window instead.
     """
 
     provider = "chatgpt_web"
@@ -273,7 +300,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
     ):
         self.model = model
         self._timeout = timeout
-        # Respect env override; default True (silent)
+        # Default True (headless + stealth). Set CHATGPT_WEB_HEADLESS=0 for visible window.
         if headless is None:
             env_val = os.environ.get("CHATGPT_WEB_HEADLESS", "1")
             self._headless = env_val.lower() not in ("0", "false", "no")
@@ -285,46 +312,62 @@ class ChatGPTWebEvaluator(BaseEvaluator):
         Try browsers in order: Chrome headless → Chromium headless → visible fallback.
         Returns a connected browser instance.
         """
+        import tempfile
+        import uuid
+
+        # Use a unique dir per request so concurrent calls never share state.
+        # Also avoids stale lock files from previous crashed sessions.
+        user_data_dir = os.path.join(tempfile.gettempdir(), f"pw-keval-{uuid.uuid4().hex[:8]}")
+        os.makedirs(user_data_dir, exist_ok=True)
+        self._user_data_dir = user_data_dir  # store for cleanup in evaluate()
+        
         errors = []
 
-        # Tier 1: real Chrome + new headless (hardest to detect)
         if self._headless:
+            # Headless mode: try real Chrome → bundled Chromium → visible fallback
+            # user_agent is set here so HTTP headers also show the patched UA (not just JS)
             try:
-                browser = await pw.chromium.launch(
+                browser = await pw.chromium.launch_persistent_context(
+                    user_data_dir,
                     channel="chrome",
                     headless=True,
                     args=_STEALTH_ARGS,
+                    user_agent=_USER_AGENT,
                 )
                 return browser
             except Exception as e:
                 errors.append(f"Chrome headless: {e}")
 
-        # Tier 2: bundled Chromium + headless (works in Docker/CI)
-        if self._headless:
             try:
-                browser = await pw.chromium.launch(
+                browser = await pw.chromium.launch_persistent_context(
+                    user_data_dir,
                     headless=True,
                     args=_STEALTH_ARGS,
+                    user_agent=_USER_AGENT,
                 )
                 return browser
             except Exception as e:
                 errors.append(f"Chromium headless: {e}")
 
-        # Tier 3: visible window fallback (always works but shows UI)
+        # Visible mode (CHATGPT_WEB_HEADLESS=0): real Chrome → bundled Chromium
         try:
-            browser = await pw.chromium.launch(
+            browser = await pw.chromium.launch_persistent_context(
+                user_data_dir,
                 channel="chrome",
                 headless=False,
                 args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                user_agent=_USER_AGENT,
             )
             return browser
-        except Exception:
-            pass
+        except Exception as e:
+            errors.append(f"Chrome visible: {e}")
 
-        browser = await pw.chromium.launch(
+        browser = await pw.chromium.launch_persistent_context(
+            user_data_dir,
             headless=False,
             args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
                   "--disable-dev-shm-usage"],
+            user_agent=_USER_AGENT,
         )
         return browser
 
@@ -341,19 +384,24 @@ class ChatGPTWebEvaluator(BaseEvaluator):
         full_prompt = f"{SYSTEM_PROMPT}\n\n---\n\n{build_user_prompt(request)}"
 
         async with async_playwright() as pw:
-            browser = await self._launch_browser(pw)
-            context = await browser.new_context(
-                user_agent=_USER_AGENT,
-                viewport={"width": 1280, "height": 800},
-                locale="en-US",
-                timezone_id="America/New_York",
-                color_scheme="light",
-                java_script_enabled=True,
-            )
-            # Inject stealth patches before any page script runs
+            context = await self._launch_browser(pw)
+            
+            # Since we used launch_persistent_context, we cannot call new_context again.
+            # We apply the stealth script and limits to all pages in this context.
             await context.add_init_script(_STEALTH_SCRIPT)
 
-            page = await context.new_page()
+            # In persistent contexts, there's always an initial page
+            pages = context.pages
+            if pages:
+                page = pages[0]
+            else:
+                page = await context.new_page()
+
+            # Hard timeout: close the browser if no response within 5 minutes (300s).
+            # This ensures the visible Chrome window always closes even if something hangs.
+            page.set_default_timeout(300_000)
+            await page.set_viewport_size({"width": 1280, "height": 800})
+            
             raw_text = ""
             try:
                 await page.goto(
@@ -361,6 +409,14 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                     wait_until="domcontentloaded",
                     timeout=30000,
                 )
+
+                # If Cloudflare challenge detected immediately, raise
+                title = await page.title()
+                if "just a moment" in title.lower() or "cloudflare" in title.lower():
+                    raise RuntimeError(
+                        "Cloudflare bot-detection triggered. "
+                        "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
+                    )
 
                 # Dismiss modals (login prompt, cookie banner, etc.)
                 for dismiss_text in ["Stay logged out", "Start now", "OK"]:
@@ -371,20 +427,39 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                     except Exception:
                         pass
 
-                # If Cloudflare challenge detected, raise immediately
-                title = await page.title()
-                if "just a moment" in title.lower() or "cloudflare" in title.lower():
-                    raise RuntimeError(
-                        "Cloudflare bot-detection triggered in headless mode. "
-                        "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
-                    )
-
                 textarea = page.locator("#prompt-textarea").first
                 await textarea.wait_for(state="visible", timeout=15000)
                 await textarea.click()
-                await textarea.fill(full_prompt)
 
-                await page.locator("[data-testid='send-button']").click()
+                # Use execCommand('insertText') — the only safe way to insert multi-line
+                # text into ChatGPT's contenteditable without \n triggering "send".
+                # keyboard.type() maps \n → Enter which sends the message prematurely.
+                await page.evaluate(
+                    """(text) => {
+                        const el = document.querySelector('#prompt-textarea');
+                        el.focus();
+                        document.execCommand('selectAll', false, null);
+                        document.execCommand('insertText', false, text);
+                    }""",
+                    full_prompt,
+                )
+
+                # Try send button first; fall back to Enter key
+                try:
+                    send_btn = page.locator("[data-testid='send-button']").first
+                    await send_btn.wait_for(state="visible", timeout=5000)
+                    await send_btn.click()
+                except Exception:
+                    await page.keyboard.press("Enter")
+
+                # Check for bot detection after sending (Cloudflare may appear post-load)
+                await page.wait_for_timeout(1500)
+                title = await page.title()
+                if "just a moment" in title.lower() or "cloudflare" in title.lower():
+                    raise RuntimeError(
+                        "Cloudflare bot-detection triggered. "
+                        "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
+                    )
 
                 # Wait until assistant response has actual content
                 await page.wait_for_function(
@@ -401,7 +476,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                 # Wait for generation to finish (stop button disappears)
                 try:
                     await page.locator("[data-testid='stop-button']").wait_for(
-                        state="hidden", timeout=30000
+                        state="hidden", timeout=60000
                     )
                 except Exception:
                     pass
@@ -417,13 +492,19 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                 )
 
             finally:
-                await browser.close()
+                await context.close()
+                # Clean up per-request user_data_dir (avoids stale lock files)
+                import shutil
+                try:
+                    shutil.rmtree(getattr(self, "_user_data_dir", ""), ignore_errors=True)
+                except Exception:
+                    pass
 
         if not raw_text:
             raise RuntimeError("ChatGPT returned an empty response.")
 
         scores = parse_evaluation_response(raw_text, request.results)
-        return self._build_response(request, scores)
+        return self._build_response(request, scores, raw_llm_response=raw_text)
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +549,7 @@ class AnthropicEvaluator(BaseEvaluator):
             scores,
             prompt_tokens=usage.input_tokens if usage else None,
             completion_tokens=usage.output_tokens if usage else None,
+            raw_llm_response=raw,
         )
 
 

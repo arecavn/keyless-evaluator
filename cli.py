@@ -13,12 +13,12 @@ import typer
 from dotenv import load_dotenv
 from rich.console import Console
 
-from keyless_evaluator.evaluators import PROVIDER_MAP, get_evaluator
-from keyless_evaluator.models import (
+from evaluators import PROVIDER_MAP, get_evaluator
+from models import (
     EvaluationRequest,
     SearchResult,
 )
-from keyless_evaluator.renderer import (
+from renderer import (
     render_detail_panel,
     render_result_table,
     render_summary,
@@ -197,7 +197,7 @@ def cmd_detail(
     index: int = typer.Argument(0, help="0-based index of the result to show detail for"),
 ) -> None:
     """Show detailed reasoning for a specific result from a saved evaluation."""
-    from keyless_evaluator.models import EvaluationResponse
+    from models import EvaluationResponse
 
     data = json.loads(results_json.read_text(encoding="utf-8"))
     response = EvaluationResponse(**data)
@@ -345,7 +345,7 @@ def cmd_serve(
         "  [dim]• Health:   http://127.0.0.1:8000/health[/dim]\n"
     )
 
-    uvicorn.run("keyless_evaluator.server:app", host=host, port=port, reload=False)
+    uvicorn.run("server:app", host=host, port=port, reload=False)
 
 
 def main() -> None:
