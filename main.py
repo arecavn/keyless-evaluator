@@ -11,6 +11,9 @@ import sys
 # Add api/ to path so flat modules (server, cli, models, …) are importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "api"))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import uvicorn
 
 if __name__ == "__main__":

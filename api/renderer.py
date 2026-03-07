@@ -103,7 +103,7 @@ def render_summary(resp: EvaluationResponse) -> None:
     console.print(
         Panel(
             f"{score_dist}\n\n{ndcg_str}{avg_str}{model_str}{tokens_str}",
-            title=f"[bold]Query:[/bold] {resp.query}",
+            title=f"[bold]Input:[/bold] {resp.input}",
             border_style="#5865f2",
             padding=(0, 2),
         )

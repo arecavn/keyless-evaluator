@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 class FieldMapping(BaseModel):
     """
-    Field mapping for dynamic JSON input (used by /v1/evaluate/raw).
+    Field mapping for dynamic JSON output.
 
     All fields are optional — omit any you don't need to override.
     Dot-notation is supported for nested paths, e.g. ``"hits.hits"``.
@@ -23,66 +23,39 @@ class FieldMapping(BaseModel):
             "Use '' (empty string) if the root itself is the array."
         ),
     )
-    id_field: str = Field(
-        default="id",
-        description="Field name inside each item to use as the result ID.",
-    )
+    id_field: str = Field(default="id", description="Field name to use as the result ID.")
     title_field: str = Field(
         default="",
-        description=(
-            "Field name inside each item to use as the title. "
-            "If empty, auto-detected from common names: "
-            "title, jobTitle, name, headline, subject, label."
-        ),
+        description="Field name for the title. Auto-detected if empty (title, jobTitle, name, headline…).",
     )
     snippet_field: str = Field(
         default="",
-        description=(
-            "Field name inside each item to use as the snippet/description. "
-            "If empty, auto-detected from common names: "
-            "snippet, jobDescription, description, summary, body, content, excerpt."
-        ),
+        description="Field name for the snippet. Auto-detected if empty (snippet, jobDescription, description…).",
     )
     url_field: str = Field(
         default="",
-        description=(
-            "Field name inside each item to use as the URL. "
-            "If empty, auto-detected from common URL-like field names."
-        ),
+        description="Field name for the URL. Auto-detected if empty.",
     )
     metadata_fields: list[str] = Field(
         default_factory=list,
-        description=(
-            "List of additional fields to include as metadata for the LLM. "
-            "If empty, a sensible selection of scalar fields is included automatically."
-        ),
+        description="Extra fields to pass as metadata. Auto-selected if empty.",
     )
 
 
 class RelevanceScore(IntEnum):
     """Relevance score levels (TREC-style 4-point scale)."""
-    IRRELEVANT = 0       # No connection to the query
-    MARGINAL = 1         # Slightly related, mostly misses intent
-    RELEVANT = 2         # Answers query partially / mostly
-    HIGHLY_RELEVANT = 3  # Perfect match
+    IRRELEVANT = 0
+    MARGINAL = 1
+    RELEVANT = 2
+    HIGHLY_RELEVANT = 3
 
     @property
     def label(self) -> str:
-        return {
-            0: "Irrelevant",
-            1: "Marginal",
-            2: "Relevant",
-            3: "Highly Relevant",
-        }[self.value]
+        return {0: "Irrelevant", 1: "Marginal", 2: "Relevant", 3: "Highly Relevant"}[self.value]
 
     @property
     def color(self) -> str:
-        return {
-            0: "red",
-            1: "yellow",
-            2: "cyan",
-            3: "green",
-        }[self.value]
+        return {0: "red", 1: "yellow", 2: "cyan", 3: "green"}[self.value]
 
     @property
     def emoji(self) -> str:
@@ -90,34 +63,41 @@ class RelevanceScore(IntEnum):
 
 
 class SearchResult(BaseModel):
-    """A single search result item to be evaluated."""
-    id: str | int = Field(description="Unique identifier for the result (e.g., document id, URL, job id)")
-    title: str = Field(description="Title or headline of the result")
+    """A single item to be evaluated."""
+    id: str | int = Field(description="Unique identifier")
+    title: str = Field(description="Title or headline")
     snippet: str = Field(default="", description="Short excerpt or description")
-    url: str | None = Field(default=None, description="URL if applicable")
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Extra context fields")
+    url: str | None = Field(default=None)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResultScore(BaseModel):
-    """LLM-generated score for a single search result."""
+    """LLM-generated score for a single result."""
     result_id: str | int
     title: str
     score: RelevanceScore
-    reason_summary: str = Field(description="One-sentence summary of why this score was given")
-    reason_detail: str = Field(description="Detailed explanation of the relevance judgment")
-    raw_response: str | None = Field(default=None, exclude=True, description="Raw LLM output (not serialized; written to logs/llm.log)")
+    reason_summary: str = Field(description="One-sentence summary")
+    reason_detail: str = Field(description="Detailed justification")
+    raw_response: str | None = Field(
+        default=None, exclude=True,
+        description="Raw LLM output (not serialized; written to logs/llm.log)",
+    )
 
 
 class EvaluationRequest(BaseModel):
-    """A full evaluation request: query + list of results."""
-    query: str = Field(description="The search query being evaluated")
-    query_context: str | None = Field(default=None, description="Additional context about the query intent")
-    results: list[SearchResult] = Field(description="The ordered list of search results to evaluate")
+    """Internal evaluation request passed to evaluator backends."""
+    input: str = Field(description="The search query or evaluation criterion")
+    prompt: str | None = Field(
+        default=None,
+        description="Custom evaluation prompt (replaces the default SYSTEM_PROMPT when provided)",
+    )
+    query_context: str | None = Field(default=None, description="Extra context about the query intent")
+    results: list[SearchResult] = Field(description="The ordered list of results to evaluate")
 
 
 class EvaluationResponse(BaseModel):
     """Full evaluation response from the LLM evaluator."""
-    query: str
+    input: str
     model: str
     provider: str
     scores: list[ResultScore]
@@ -145,50 +125,77 @@ class EvaluationResponse(BaseModel):
         ]
 
 
-class RawEvaluationRequest(BaseModel):
+class EvaluationRequestBody(BaseModel):
     """
-    Dynamic-input evaluation request.
+    Unified request body for ``POST /v1/evaluate``.
 
-    Pass the raw JSON response body from **any** search API directly — no reformatting needed.
-    The adapter will extract results using ``mapping`` and convert them to ``SearchResult`` objects.
+    ``output`` accepts **either**:
 
-    Example — copy your search API response verbatim into ``raw``:
+    - **string** — a plain text document/passage to score against ``input``
+    - **JSON object / array** — raw response from any search API; field names are auto-detected
 
-    .. code-block:: json
+    ``prompt`` replaces the built-in evaluation instructions when provided (up to ~5 000 tokens).
+    Use it to define your own scoring rubric for job search, candidate matching, product search, etc.
 
-        {
-          "query": "remote jobs",
-          "raw": { ...your full search API response here... },
-          "mapping": {
-            "data_path": "data",
-            "id_field": "id",
-            "title_field": "jobTitle",
-            "snippet_field": "jobDescription",
-            "metadata_fields": ["company", "salary", "location", "employmentTypeEn"]
-          }
-        }
+    ---
 
-    All ``mapping`` fields are optional — if omitted, common field names are auto-detected.
+    **Plain-text example** (single document):
+
+    ```json
+    {
+      "input": "Senior Python developer Hanoi",
+      "output": "We are looking for a Python backend engineer with 3+ years experience...",
+      "prompt": "Score how well this job posting matches the candidate profile. 3=perfect match, 0=no match."
+    }
+    ```
+
+    **JSON search API example** (multiple results, auto-detected fields):
+
+    ```json
+    {
+      "input": "remote python jobs",
+      "output": {"data": [{"id": "j1", "jobTitle": "Python Dev", "jobDescription": "..."}]},
+      "mapping": {"title_field": "jobTitle", "snippet_field": "jobDescription"}
+    }
+    ```
+
+    **Custom mapping example**:
+
+    ```json
+    {
+      "input": "remote python jobs",
+      "output": { ...search API response... },
+      "mapping": {
+        "data_path": "data",
+        "id_field": "id",
+        "title_field": "jobTitle",
+        "snippet_field": "jobDescription",
+        "metadata_fields": ["company", "salary", "location"]
+      },
+      "max_results": 10
+    }
+    ```
     """
-    query: str = Field(description="The search query to evaluate against.")
-    query_context: str | None = Field(
-        default=None,
-        description="Additional context about the query intent (optional).",
-    )
-    raw: Any = Field(
+    input: str = Field(description="The search query or evaluation criterion")
+    output: Any = Field(
         description=(
-            "The raw JSON response body from your search API. "
-            "Can be an object (with a nested array) or a bare array."
+            "What to evaluate. "
+            "A plain string (single document) OR a raw JSON object/array from a search API."
+        ),
+    )
+    prompt: str | None = Field(
+        default=None,
+        description=(
+            "Custom evaluation instructions — replaces the built-in scoring rubric. "
+            "Describe your criteria here. Supports up to ~5 000 tokens. "
+            "If omitted, the default TREC 0–3 relevance prompt is used."
         ),
     )
     mapping: FieldMapping = Field(
         default_factory=FieldMapping,
-        description="Field mapping configuration. All fields have sensible defaults.",
+        description="Field mapping for JSON output. All fields are auto-detected if omitted.",
     )
     max_results: int = Field(
-        default=20,
-        ge=1,
-        le=100,
-        description="Maximum number of results to evaluate (takes the first N from the array).",
+        default=20, ge=1, le=100,
+        description="Max results to evaluate (JSON output only).",
     )
-

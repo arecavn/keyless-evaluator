@@ -1,14 +1,4 @@
-"""FastAPI server for keyless-evaluator.
-
-Provides a REST API to evaluate search results using configurable LLM backends.
-Default: Gemini Flash (free, 1500 req/day) via GEMINI_API_KEY.
-Also supports OpenAI, Anthropic, and anonymous ChatGPT Web.
-
-Security notes:
-- In production, set ALLOWED_ORIGINS in env (comma-separated) for CORS.
-- Rate limiting is the caller's responsibility (reverse proxy / Vercel Edge).
-- API keys are read from environment, never echoed in responses.
-"""
+"""FastAPI server for keyless-evaluator."""
 
 from __future__ import annotations
 
@@ -21,37 +11,38 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from adapter import adapt_raw_input
 from evaluators import PROVIDER_MAP, get_evaluator
-from models import EvaluationRequest, EvaluationResponse, RawEvaluationRequest
+from models import EvaluationRequest, EvaluationRequestBody, EvaluationResponse, SearchResult
 
 
 def create_app() -> FastAPI:
-    """Factory to create the FastAPI application."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # playwright install is a no-op if the browser is already present.
-        # Only needed for the chatgpt_web provider.
         import subprocess, sys
         subprocess.run(
             [sys.executable, "-m", "playwright", "install", "chromium"],
-            check=False,  # don't fail startup if playwright isn't in use
+            check=False,
         )
         yield
 
-    # CORS — allow configurable origins for production deployments
     _raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
     allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
 
     app = FastAPI(
         title="Keyless Evaluator API",
         description=(
-            "Rank search results 0-3 with reason/summary using LLMs.\n\n"
+            "Score search results 0–3 with reason/summary using any LLM.\n\n"
+            "**Single endpoint** — `POST /v1/evaluate` accepts:\n"
+            "- `output` as a **plain string** (single document to score)\n"
+            "- `output` as a **JSON object/array** (raw search API response, auto-adapted)\n\n"
+            "**Custom prompt** — pass `prompt` to replace the built-in scoring rubric with your own "
+            "(job search, candidate matching, product search, etc.).\n\n"
             "**Default backend**: Gemini Flash (free — set `GEMINI_API_KEY` from "
             "[Google AI Studio](https://aistudio.google.com/apikey)).\n\n"
-            "**Anonymous backend**: Pass `?provider=chatgpt_web` for no-account ChatGPT.\n\n"
-            "**Anthropic**: Pass `?provider=anthropic` with `ANTHROPIC_API_KEY`."
+            "**Anonymous backend**: `?provider=chatgpt_web` — no account or key needed; "
+            "returns the actual ChatGPT model name in the response."
         ),
-        version="0.1.0",
+        version="0.2.0",
         lifespan=lifespan,
     )
 
@@ -64,93 +55,58 @@ def create_app() -> FastAPI:
     )
 
     @app.post("/v1/evaluate", response_model=EvaluationResponse)
-    async def evaluate_results(
-        request: EvaluationRequest,
+    async def evaluate(
+        body: EvaluationRequestBody,
         provider: Annotated[
             str,
             Query(description=f"LLM backend: {' | '.join(PROVIDER_MAP)}")
         ] = "gemini",
         model: Annotated[
             str | None,
-            Query(description="Model name (optional, uses provider default)")
+            Query(description="Model name override (optional, uses provider default)")
         ] = None,
     ) -> EvaluationResponse:
         """
-        Evaluate a query and a list of search hits.
-        Returns a 0-3 relevance score with reasons for each item.
+        Evaluate ``input`` against ``output`` using an LLM judge.
+
+        **``output`` can be:**
+        - A **string** — treated as a single document/passage to score
+        - A **JSON object/array** — raw response from any search API, fields are auto-detected
+
+        **``prompt``** replaces the built-in TREC 0–3 rubric when provided.
+        Write your own scoring criteria (job match, candidate ranking, product relevance, etc.).
 
         **Providers:**
-        - `gemini` (default) – Requires `GEMINI_API_KEY` (free from aistudio.google.com)
-        - `chatgpt_web` – No account/key needed; uses ChatGPT anonymous web session
-        - `openai` – Requires `OPENAI_API_KEY`
-        - `anthropic` – Requires `ANTHROPIC_API_KEY`
+        - `gemini` (default) — free 1500 req/day, set `GEMINI_API_KEY`
+        - `chatgpt_web` — no account/key, returns detected model name
+        - `openai` — set `OPENAI_API_KEY`
+        - `anthropic` — set `ANTHROPIC_API_KEY`
         """
-        if not request.results:
-            raise HTTPException(status_code=400, detail="No search results provided.")
+        # Convert output (str or JSON) → list[SearchResult]
+        if isinstance(body.output, str):
+            results = [
+                SearchResult(
+                    id="1",
+                    title=body.input[:200],
+                    snippet=body.output,
+                )
+            ]
+        else:
+            try:
+                results = adapt_raw_input(
+                    raw=body.output,
+                    mapping=body.mapping,
+                    max_results=body.max_results,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
 
-        try:
-            evaluator = get_evaluator(provider=provider, model=model)
-            return await evaluator.evaluate(request)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @app.post("/v1/evaluate/raw", response_model=EvaluationResponse)
-    async def evaluate_raw(
-        request: RawEvaluationRequest,
-        provider: Annotated[
-            str,
-            Query(description=f"LLM backend: {' | '.join(PROVIDER_MAP)}")
-        ] = "gemini",
-        model: Annotated[
-            str | None,
-            Query(description="Model name (optional, uses provider default)")
-        ] = None,
-    ) -> EvaluationResponse:
-        """
-        Evaluate search results from **any search API response** — no reformatting needed.
-
-        Paste your search API's JSON response body directly into ``raw``.
-        The adapter extracts results using ``mapping`` (all fields optional with smart defaults).
-
-        **Minimal example** (auto-detect everything):
-        ```json
-        {
-          "query": "remote jobs",
-          "raw": { ...your search API response... }
-        }
-        ```
-
-        **With explicit mapping** (for non-standard field names):
-        ```json
-        {
-          "query": "remote jobs",
-          "raw": { ...your search API response... },
-          "mapping": {
-            "data_path": "data",
-            "id_field": "id",
-            "title_field": "jobTitle",
-            "snippet_field": "jobDescription",
-            "metadata_fields": ["company", "salary", "location", "employmentTypeEn"]
-          }
-        }
-        ```
-
-        **Providers:** same as `/v1/evaluate` — gemini (default), openai, anthropic, chatgpt_web.
-        """
-        try:
-            results = adapt_raw_input(
-                raw=request.raw,
-                mapping=request.mapping,
-                max_results=request.max_results,
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+        if not results:
+            raise HTTPException(status_code=400, detail="No results to evaluate.")
 
         eval_request = EvaluationRequest(
-            query=request.query,
-            query_context=request.query_context,
+            input=body.input,
+            prompt=body.prompt,
             results=results,
         )
 
@@ -164,9 +120,10 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check():
-        """Liveness probe — safe to call without auth."""
+        """Liveness probe."""
         return {
             "status": "ok",
+            "version": "0.2.0",
             "default_provider": "gemini",
             "providers": list(PROVIDER_MAP.keys()),
             "gemini_key_set": bool(os.environ.get("GEMINI_API_KEY")),
@@ -176,7 +133,6 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     async def root():
-        """Redirect hint — OpenAPI docs are at /docs."""
         return {"message": "Keyless Evaluator API", "docs": "/docs", "health": "/health"}
 
     return app

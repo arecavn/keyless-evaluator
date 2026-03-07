@@ -47,7 +47,7 @@ err_console = Console(stderr=True)
 
 @app.command("eval")
 def cmd_eval(
-    query: str = typer.Option(..., "--query", "-q", help="The search query to evaluate"),
+    input_text: str = typer.Option(..., "--input", "-i", "--query", "-q", help="The search query or evaluation input"),
     results_file: Optional[Path] = typer.Option(
         None, "--file", "-f",
         help="Path to JSON file with search results (array of {id, title, snippet?, url?, ...})"
@@ -74,7 +74,7 @@ def cmd_eval(
     ),
 ) -> None:
     """
-    Evaluate search results for a query using an LLM judge.
+    Evaluate search results for an input using an LLM judge.
 
     [bold]Quick start (free, no credit card):[/bold]
     Set GEMINI_API_KEY from [cyan]aistudio.google.com[/cyan] (1500 free req/day), then:
@@ -123,13 +123,13 @@ def cmd_eval(
                     + "  ".join(str(p) for p in nearby)
                 )
                 err_console.print(
-                    f"\n  Try: [bold]keyless-eval eval -q \"{query}\" -f {nearby[0]}[/bold]"
+                    f"\n  Try: [bold]keyless-eval eval -q \"{input_text}\" -f {nearby[0]}[/bold]"
                 )
             else:
                 err_console.print(
                     "[dim]No JSON files found in current directory.[/dim]\n"
                     "  Generate an example: [bold]keyless-eval example[/bold]\n"
-                    "  Then run:            [bold]keyless-eval eval -q \"your query\" -f example_results.json[/bold]"
+                    "  Then run:            [bold]keyless-eval eval -q \"your input\" -f example_results.json[/bold]"
                 )
             raise typer.Exit(1)
         raw = results_file.read_text(encoding="utf-8")
@@ -149,7 +149,7 @@ def cmd_eval(
 
     results = [SearchResult(**r) if isinstance(r, dict) else r for r in raw_results]
     request = EvaluationRequest(
-        query=query,
+        input=input_text,
         query_context=query_context,
         results=results,
     )
@@ -163,7 +163,7 @@ def cmd_eval(
     )
     console.print(
         f"\n[bold]🔮 Evaluating[/bold] [cyan]{len(results)}[/cyan] results "
-        f"for query: [bold italic]\"{query}\"[/bold italic]\n"
+        f"for input: [bold italic]'{input_text}'[/bold italic]\n"
         f"   Backend: [dim]{provider}/{evaluator.model}[/dim]  Auth: {auth_note}\n"
     )
 
@@ -312,9 +312,9 @@ def cmd_providers() -> None:
         "\n[bold green]Free & easy (recommended):[/bold green]\n"
         "  1. Get a free GEMINI_API_KEY at [cyan]aistudio.google.com[/cyan]\n"
         "  2. Add to .env: [bold]GEMINI_API_KEY=AI...[/bold]\n"
-        "  3. Run: [bold]keyless-eval eval -q \"your query\" -f results.json[/bold]\n"
+        "  3. Run: [bold]keyless-eval eval -q \"your input\" -f results.json[/bold]\n"
         "\n[bold yellow]No account, no key — ChatGPT anonymous browser:[/bold yellow]\n"
-        "  [bold]keyless-eval eval -q \"query\" -f results.json -p chatgpt_web[/bold]\n"
+        "  [bold]keyless-eval eval -q \"input_text\" -f results.json -p chatgpt_web[/bold]\n"
         "  (Opens a Chrome window automatically)\n"
         "\n[dim]Optional — add to .env:[/dim]\n"
         "  OPENAI_API_KEY=sk-...    # for -p openai\n"

@@ -1,4 +1,4 @@
-"""LLM provider backends: OpenAI, Gemini, ChatGPT Web (anonymous)."""
+"""LLM provider backends: OpenAI, Gemini, ChatGPT Web (anonymous), Anthropic."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from models import (
 )
 from parser import parse_evaluation_response
 from prompts import (
+    OUTPUT_FORMAT,
     SYSTEM_PROMPT,
     build_user_prompt,
 )
@@ -77,6 +78,12 @@ class BaseEvaluator(ABC):
     async def evaluate(self, request: EvaluationRequest) -> EvaluationResponse:
         ...
 
+    def _system_prompt(self, request: EvaluationRequest) -> str:
+        """Return the system prompt. Custom prompts get the output format spec appended."""
+        if request.prompt:
+            return request.prompt + OUTPUT_FORMAT
+        return SYSTEM_PROMPT
+
     def _build_response(
         self,
         request: EvaluationRequest,
@@ -84,10 +91,12 @@ class BaseEvaluator(ABC):
         prompt_tokens: int | None = None,
         completion_tokens: int | None = None,
         raw_llm_response: str | None = None,
+        model_override: str | None = None,
     ) -> EvaluationResponse:
+        model = model_override or self.model
         resp = EvaluationResponse(
-            query=request.query,
-            model=self.model,
+            input=request.input,
+            model=model,
             provider=self.provider,
             scores=scores,
             prompt_tokens=prompt_tokens,
@@ -98,12 +107,12 @@ class BaseEvaluator(ABC):
         if raw_llm_response is not None:
             _ensure_llm_logger()
             _llm_logger.info(
-                "provider=%s model=%s tokens=%s/%s query=%r\n%s\n%s\n%s",
+                "provider=%s model=%s tokens=%s/%s input=%r\n%s\n%s\n%s",
                 self.provider,
-                self.model,
+                model,
                 prompt_tokens,
                 completion_tokens,
-                request.query,
+                request.input,
                 "--- RAW LLM RESPONSE ---",
                 raw_llm_response,
                 "--- END ---",
@@ -132,15 +141,12 @@ class OpenAIEvaluator(BaseEvaluator):
         except ImportError as exc:
             raise RuntimeError("openai package not installed. Run: uv add openai") from exc
 
-        client = AsyncOpenAI(
-            api_key=self._api_key,
-            base_url=self._base_url,
-        )
+        client = AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
 
         response = await client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt(request)},
                 {"role": "user", "content": build_user_prompt(request)},
             ],
             temperature=0.1,
@@ -152,8 +158,7 @@ class OpenAIEvaluator(BaseEvaluator):
 
         usage = response.usage
         return self._build_response(
-            request,
-            scores,
+            request, scores,
             prompt_tokens=usage.prompt_tokens if usage else None,
             completion_tokens=usage.completion_tokens if usage else None,
             raw_llm_response=raw,
@@ -184,12 +189,11 @@ class GeminiEvaluator(BaseEvaluator):
         genai.configure(api_key=self._api_key)
         model = genai.GenerativeModel(
             model_name=self.model,
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=self._system_prompt(request),
         )
 
         user_prompt = build_user_prompt(request)
 
-        # Run in executor to avoid blocking the event loop (SDK is sync)
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
@@ -204,8 +208,7 @@ class GeminiEvaluator(BaseEvaluator):
 
         usage = getattr(response, "usage_metadata", None)
         return self._build_response(
-            request,
-            scores,
+            request, scores,
             prompt_tokens=getattr(usage, "prompt_token_count", None) if usage else None,
             completion_tokens=getattr(usage, "candidates_token_count", None) if usage else None,
             raw_llm_response=raw,
@@ -213,17 +216,14 @@ class GeminiEvaluator(BaseEvaluator):
 
 
 # ---------------------------------------------------------------------------
-# ChatGPT Web Evaluator — anonymous, silent, no account / no API key
+# ChatGPT Web Evaluator — anonymous, no account / no API key
 # ---------------------------------------------------------------------------
 
-# Full stealth init script injected on every page before any JS runs.
-# Patches the most common fingerprinting vectors used by Cloudflare and
-# ChatGPT's bot-detection layer to distinguish headless from real browsers.
 _STEALTH_SCRIPT = """
-// 1. Hide webdriver flag — the most obvious headless tell
+// 1. Hide webdriver flag
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 
-// 2. Patch userAgent — headless Chrome includes 'HeadlessChrome', Cloudflare checks this
+// 2. Patch userAgent — headless Chrome includes 'HeadlessChrome'
 const _realUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 Object.defineProperty(navigator, 'userAgent',  {get: () => _realUA});
 Object.defineProperty(navigator, 'appVersion', {get: () => _realUA.replace('Mozilla/', '')});
@@ -250,9 +250,7 @@ navigator.permissions.query = (p) =>
     : _origPerms(p);
 
 // NOTE: Do NOT override navigator.plugins or window/screen dimensions.
-// The PluginArray prototype mutation breaks ChatGPT's React streaming renderer,
-// causing the assistant response container to appear in the DOM with empty text.
-// Window dimension overrides similarly interfere with React's layout calculations.
+// Doing so breaks ChatGPT's React streaming renderer (assistant text stays empty).
 """
 
 _STEALTH_ARGS = [
@@ -264,7 +262,7 @@ _STEALTH_ARGS = [
     "--window-size=1280,800",
     "--start-maximized",
     "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-web-security",       # avoids some iframe fingerprinting
+    "--disable-web-security",
     "--lang=en-US,en",
 ]
 
@@ -274,33 +272,43 @@ _USER_AGENT = (
     "Chrome/131.0.0.0 Safari/537.36"
 )
 
+# JS selectors tried in order to detect the active ChatGPT model name
+_MODEL_DETECTION_JS = """
+() => {
+    const selectors = [
+        '[data-testid="model-switcher-dropdown-button"]',
+        'button[aria-haspopup="menu"][id*="model"]',
+        'button[aria-label*="model" i]',
+        'button[aria-label*="Model" i]',
+    ];
+    for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+            const text = (el.innerText || el.textContent || '').trim();
+            if (text) return text;
+        }
+    }
+    return null;
+}
+"""
+
 
 class ChatGPTWebEvaluator(BaseEvaluator):
     """
     Evaluate using ChatGPT's public anonymous web interface via Playwright.
 
-    **Headless by default with full stealth** — runs Chrome in headless mode
-    while masking all common bot-detection fingerprints used by Cloudflare/ChatGPT:
-    - navigator.userAgent patched to remove "HeadlessChrome"
-    - navigator.webdriver hidden
-    - Realistic plugins, hardwareConcurrency, deviceMemory, screen dimensions
-    - chrome.runtime, chrome.loadTimes, chrome.csi present
-    - Permissions API returns 'default' for notifications
+    Headless by default with full stealth fingerprint patching.
+    Set CHATGPT_WEB_HEADLESS=0 for a visible Chrome window.
 
-    Set CHATGPT_WEB_HEADLESS=0 to force a visible Chrome window instead.
+    After each response the active model name is read from the ChatGPT UI
+    and returned in the ``model`` field of the response JSON.
     """
 
     provider = "chatgpt_web"
 
-    def __init__(
-        self,
-        model: str = "auto",
-        timeout: int = 120,
-        headless: bool | None = None,
-    ):
+    def __init__(self, model: str = "auto", timeout: int = 120, headless: bool | None = None):
         self.model = model
         self._timeout = timeout
-        # Default True (headless + stealth). Set CHATGPT_WEB_HEADLESS=0 for visible window.
         if headless is None:
             env_val = os.environ.get("CHATGPT_WEB_HEADLESS", "1")
             self._headless = env_val.lower() not in ("0", "false", "no")
@@ -308,68 +316,41 @@ class ChatGPTWebEvaluator(BaseEvaluator):
             self._headless = headless
 
     async def _launch_browser(self, pw):
-        """
-        Try browsers in order: Chrome headless → Chromium headless → visible fallback.
-        Returns a connected browser instance.
-        """
-        import tempfile
-        import uuid
-
-        # Use a unique dir per request so concurrent calls never share state.
-        # Also avoids stale lock files from previous crashed sessions.
+        import tempfile, uuid
         user_data_dir = os.path.join(tempfile.gettempdir(), f"pw-keval-{uuid.uuid4().hex[:8]}")
         os.makedirs(user_data_dir, exist_ok=True)
-        self._user_data_dir = user_data_dir  # store for cleanup in evaluate()
-        
-        errors = []
+        self._user_data_dir = user_data_dir
 
         if self._headless:
-            # Headless mode: try real Chrome → bundled Chromium → visible fallback
-            # user_agent is set here so HTTP headers also show the patched UA (not just JS)
             try:
-                browser = await pw.chromium.launch_persistent_context(
-                    user_data_dir,
-                    channel="chrome",
-                    headless=True,
-                    args=_STEALTH_ARGS,
-                    user_agent=_USER_AGENT,
+                return await pw.chromium.launch_persistent_context(
+                    user_data_dir, channel="chrome", headless=True,
+                    args=_STEALTH_ARGS, user_agent=_USER_AGENT,
                 )
-                return browser
-            except Exception as e:
-                errors.append(f"Chrome headless: {e}")
-
+            except Exception:
+                pass
             try:
-                browser = await pw.chromium.launch_persistent_context(
-                    user_data_dir,
-                    headless=True,
-                    args=_STEALTH_ARGS,
-                    user_agent=_USER_AGENT,
+                return await pw.chromium.launch_persistent_context(
+                    user_data_dir, headless=True,
+                    args=_STEALTH_ARGS, user_agent=_USER_AGENT,
                 )
-                return browser
-            except Exception as e:
-                errors.append(f"Chromium headless: {e}")
+            except Exception:
+                pass
 
-        # Visible mode (CHATGPT_WEB_HEADLESS=0): real Chrome → bundled Chromium
         try:
-            browser = await pw.chromium.launch_persistent_context(
-                user_data_dir,
-                channel="chrome",
-                headless=False,
+            return await pw.chromium.launch_persistent_context(
+                user_data_dir, channel="chrome", headless=False,
                 args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
                 user_agent=_USER_AGENT,
             )
-            return browser
-        except Exception as e:
-            errors.append(f"Chrome visible: {e}")
+        except Exception:
+            pass
 
-        browser = await pw.chromium.launch_persistent_context(
-            user_data_dir,
-            headless=False,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
-                  "--disable-dev-shm-usage"],
+        return await pw.chromium.launch_persistent_context(
+            user_data_dir, headless=False,
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
             user_agent=_USER_AGENT,
         )
-        return browser
 
     async def evaluate(self, request: EvaluationRequest) -> EvaluationResponse:
         try:
@@ -381,36 +362,24 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                 "  uv run playwright install chromium"
             ) from exc
 
-        full_prompt = f"{SYSTEM_PROMPT}\n\n---\n\n{build_user_prompt(request)}"
+        system = self._system_prompt(request)
+        full_prompt = f"{system}\n\n---\n\n{build_user_prompt(request)}"
+
+        detected_model: str | None = None
+        raw_text = ""
 
         async with async_playwright() as pw:
             context = await self._launch_browser(pw)
-            
-            # Since we used launch_persistent_context, we cannot call new_context again.
-            # We apply the stealth script and limits to all pages in this context.
             await context.add_init_script(_STEALTH_SCRIPT)
 
-            # In persistent contexts, there's always an initial page
             pages = context.pages
-            if pages:
-                page = pages[0]
-            else:
-                page = await context.new_page()
-
-            # Hard timeout: close the browser if no response within 5 minutes (300s).
-            # This ensures the visible Chrome window always closes even if something hangs.
+            page = pages[0] if pages else await context.new_page()
             page.set_default_timeout(300_000)
             await page.set_viewport_size({"width": 1280, "height": 800})
-            
-            raw_text = ""
-            try:
-                await page.goto(
-                    "https://chatgpt.com/",
-                    wait_until="domcontentloaded",
-                    timeout=30000,
-                )
 
-                # If Cloudflare challenge detected immediately, raise
+            try:
+                await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=30000)
+
                 title = await page.title()
                 if "just a moment" in title.lower() or "cloudflare" in title.lower():
                     raise RuntimeError(
@@ -418,7 +387,6 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                         "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
                     )
 
-                # Dismiss modals (login prompt, cookie banner, etc.)
                 for dismiss_text in ["Stay logged out", "Start now", "OK"]:
                     try:
                         btn = page.get_by_text(dismiss_text, exact=True).first
@@ -427,13 +395,16 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                     except Exception:
                         pass
 
+                # Try to detect the active model before sending (UI is stable at this point)
+                try:
+                    detected_model = await page.evaluate(_MODEL_DETECTION_JS)
+                except Exception:
+                    pass
+
                 textarea = page.locator("#prompt-textarea").first
                 await textarea.wait_for(state="visible", timeout=15000)
                 await textarea.click()
 
-                # Use execCommand('insertText') — the only safe way to insert multi-line
-                # text into ChatGPT's contenteditable without \n triggering "send".
-                # keyboard.type() maps \n → Enter which sends the message prematurely.
                 await page.evaluate(
                     """(text) => {
                         const el = document.querySelector('#prompt-textarea');
@@ -444,7 +415,6 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                     full_prompt,
                 )
 
-                # Try send button first; fall back to Enter key
                 try:
                     send_btn = page.locator("[data-testid='send-button']").first
                     await send_btn.wait_for(state="visible", timeout=5000)
@@ -452,7 +422,6 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                 except Exception:
                     await page.keyboard.press("Enter")
 
-                # Check for bot detection after sending (Cloudflare may appear post-load)
                 await page.wait_for_timeout(1500)
                 title = await page.title()
                 if "just a moment" in title.lower() or "cloudflare" in title.lower():
@@ -461,7 +430,6 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                         "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
                     )
 
-                # Wait until assistant response has actual content
                 await page.wait_for_function(
                     """() => {
                         const msgs = document.querySelectorAll('[data-message-author-role="assistant"]');
@@ -473,7 +441,6 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                     timeout=self._timeout * 1000,
                 )
 
-                # Wait for generation to finish (stop button disappears)
                 try:
                     await page.locator("[data-testid='stop-button']").wait_for(
                         state="hidden", timeout=60000
@@ -491,9 +458,15 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                     }"""
                 )
 
+                # Re-try model detection after response (model switcher may have updated)
+                if not detected_model:
+                    try:
+                        detected_model = await page.evaluate(_MODEL_DETECTION_JS)
+                    except Exception:
+                        pass
+
             finally:
                 await context.close()
-                # Clean up per-request user_data_dir (avoids stale lock files)
                 import shutil
                 try:
                     shutil.rmtree(getattr(self, "_user_data_dir", ""), ignore_errors=True)
@@ -504,7 +477,11 @@ class ChatGPTWebEvaluator(BaseEvaluator):
             raise RuntimeError("ChatGPT returned an empty response.")
 
         scores = parse_evaluation_response(raw_text, request.results)
-        return self._build_response(request, scores, raw_llm_response=raw_text)
+        return self._build_response(
+            request, scores,
+            raw_llm_response=raw_text,
+            model_override=detected_model,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -512,7 +489,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
 # ---------------------------------------------------------------------------
 
 class AnthropicEvaluator(BaseEvaluator):
-    """Evaluate using Anthropic Claude API (claude-3-5-haiku, claude-opus-4, etc.)."""
+    """Evaluate using Anthropic Claude API."""
 
     provider = "anthropic"
 
@@ -524,19 +501,15 @@ class AnthropicEvaluator(BaseEvaluator):
         try:
             import anthropic
         except ImportError as exc:
-            raise RuntimeError(
-                "anthropic package not installed. Run: uv add anthropic"
-            ) from exc
+            raise RuntimeError("anthropic package not installed. Run: uv add anthropic") from exc
 
         client = anthropic.AsyncAnthropic(api_key=self._api_key)
-
-        user_prompt = build_user_prompt(request)
 
         response = await client.messages.create(
             model=self.model,
             max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
+            system=self._system_prompt(request),
+            messages=[{"role": "user", "content": build_user_prompt(request)}],
             temperature=0.1,
         )
 
@@ -545,8 +518,7 @@ class AnthropicEvaluator(BaseEvaluator):
 
         usage = response.usage
         return self._build_response(
-            request,
-            scores,
+            request, scores,
             prompt_tokens=usage.input_tokens if usage else None,
             completion_tokens=usage.output_tokens if usage else None,
             raw_llm_response=raw,
@@ -564,7 +536,6 @@ PROVIDER_MAP: dict[str, type[BaseEvaluator]] = {
     "anthropic": AnthropicEvaluator,
 }
 
-# Default model per provider
 _DEFAULT_MODELS: dict[str, str] = {
     "openai": "gpt-4o",
     "gemini": "gemini-2.0-flash",
@@ -573,25 +544,18 @@ _DEFAULT_MODELS: dict[str, str] = {
 }
 
 
-def get_evaluator(
-    provider: str,
-    model: str | None = None,
-    **kwargs,
-) -> BaseEvaluator:
+def get_evaluator(provider: str, model: str | None = None, **kwargs) -> BaseEvaluator:
     """
     Factory: get an evaluator instance by provider name.
 
     Examples:
-        get_evaluator("gemini")                           # free, just set GEMINI_API_KEY
-        get_evaluator("chatgpt_web")                      # no account / no key needed
+        get_evaluator("gemini")
+        get_evaluator("chatgpt_web")
         get_evaluator("openai", model="gpt-4o")
         get_evaluator("anthropic", model="claude-opus-4-5")
     """
     key = provider.lower()
     cls = PROVIDER_MAP.get(key)
     if cls is None:
-        raise ValueError(
-            f"Unknown provider '{provider}'. Choose from: {', '.join(PROVIDER_MAP)}"
-        )
-
+        raise ValueError(f"Unknown provider '{provider}'. Choose from: {', '.join(PROVIDER_MAP)}")
     return cls(model=model or _DEFAULT_MODELS[key], **kwargs)

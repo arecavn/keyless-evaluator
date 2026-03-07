@@ -32,17 +32,34 @@ You MUST return a JSON array — one object per result — in this exact schema:
 Return ONLY valid JSON, no markdown fences, no extra commentary.\
 """
 
+OUTPUT_FORMAT = """
+
+## Output Format
+You MUST return a JSON array — one object per result — in this exact schema:
+```json
+[
+  {
+    "result_id": "<id>",
+    "score": <0|1|2|3>,
+    "reason_summary": "<one sentence>",
+    "reason_detail": "<2-4 sentence detailed justification>"
+  },
+  ...
+]
+```
+Return ONLY valid JSON, no markdown fences, no extra commentary."""
+
 
 def build_user_prompt(req: EvaluationRequest) -> str:
     """Build the user-turn prompt from an evaluation request."""
     lines: list[str] = []
 
-    lines.append(f"## Query\n{req.query}")
+    lines.append(f"## Input\n{req.input}")
 
     if req.query_context:
-        lines.append(f"\n## Query Context\n{req.query_context}")
+        lines.append(f"\n## Context\n{req.query_context}")
 
-    lines.append("\n## Search Results to Evaluate")
+    lines.append("\n## Results to Evaluate")
     for i, result in enumerate(req.results, 1):
         lines.append(f"\n### Result {i}")
         lines.append(f"- **ID**: {result.id}")
