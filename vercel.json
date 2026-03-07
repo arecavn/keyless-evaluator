@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "server.py",
+      "src": "api/server.py",
       "use": "@vercel/python",
       "config": {
         "maxLambdaSize": "50mb",
@@ -13,7 +13,7 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "server.py"
+      "dest": "api/server.py"
     }
   ],
   "env": {
@@ -59,7 +59,7 @@
     }
   ],
   "functions": {
-    "server.py": {
+    "api/server.py": {
       "maxDuration": 60,
       "memory": 512
     }

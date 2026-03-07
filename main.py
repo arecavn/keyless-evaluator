@@ -5,6 +5,12 @@ Usage:
     uv run main.py --host 0.0.0.0 --port 8080
 """
 
+import os
+import sys
+
+# Add api/ to path so flat modules (server, cli, models, …) are importable
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "api"))
+
 import uvicorn
 
 if __name__ == "__main__":
