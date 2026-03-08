@@ -286,8 +286,14 @@ def cmd_providers() -> None:
         (
             "chatgpt_web",
             "auto",
-            "[green]None[/green] (anonymous)",
-            "Anonymous ChatGPT web via Playwright. No account or key needed.",
+            "[green]None[/green] (browser login)",
+            "ChatGPT web via Playwright. Run: keyless-eval login -p chatgpt_web",
+        ),
+        (
+            "gemini_web",
+            "auto",
+            "[green]None[/green] (browser login)",
+            "Gemini web via Playwright. Run: keyless-eval login -p gemini_web",
         ),
         (
             "openai",
@@ -320,6 +326,82 @@ def cmd_providers() -> None:
         "  OPENAI_API_KEY=sk-...    # for -p openai\n"
         "  ANTHROPIC_API_KEY=sk-ant-...  # for -p anthropic\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# login command
+# ---------------------------------------------------------------------------
+
+@app.command("login")
+def cmd_login(
+    provider: str = typer.Option("chatgpt_web", "--provider", "-p", help="Provider to log in to"),
+) -> None:
+    """
+    Open a browser window to log in to a web provider and save the session.
+
+    [bold]ChatGPT (default):[/bold]
+      keyless-eval login
+      → Opens Chrome, log in manually, then close the window.
+      → Session saved to [dim]~/.local/share/keyless-eval/chatgpt[/dim]
+      → Future requests with -p chatgpt_web run headless automatically.
+
+    [bold]Custom profile path:[/bold]
+      CHATGPT_PROFILE_DIR=/my/path keyless-eval login
+    """
+    _WEB_PROVIDERS = {
+        "chatgpt_web": ("https://chatgpt.com/", "ChatGPT"),
+        "gemini_web":  ("https://gemini.google.com/", "Gemini"),
+    }
+    if provider not in _WEB_PROVIDERS:
+        err_console.print(
+            f"[red]Login not supported for provider '{provider}'.[/red]\n"
+            f"  Supported: {', '.join(_WEB_PROVIDERS)}"
+        )
+        raise typer.Exit(1)
+
+    login_url, display_name = _WEB_PROVIDERS[provider]
+
+    from evaluators import _chatgpt_profile_dir, _GEMINI_PROFILE_DIR, _SESSION_MARKER
+    profile_dir = (
+        _chatgpt_profile_dir() if provider == "chatgpt_web"
+        else os.environ.get("GEMINI_PROFILE_DIR", _GEMINI_PROFILE_DIR)
+    )
+
+    console.print(
+        f"\n[bold green]Opening {display_name} login window[/bold green]\n"
+        f"  Profile: [dim]{profile_dir}[/dim]\n\n"
+        f"  1. Log in to {display_name} in the browser window\n"
+        "  2. Close the browser window when done\n\n"
+        "[dim]Session will be saved automatically.[/dim]\n"
+    )
+
+    import asyncio
+    from playwright.async_api import async_playwright
+
+    async def _login():
+        async with async_playwright() as pw:
+            os.makedirs(profile_dir, exist_ok=True)
+            try:
+                context = await pw.chromium.launch_persistent_context(
+                    profile_dir, channel="chrome", headless=False,
+                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                )
+            except Exception:
+                context = await pw.chromium.launch_persistent_context(
+                    profile_dir, headless=False,
+                    args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+                )
+            page = context.pages[0] if context.pages else await context.new_page()
+            await page.goto(login_url)
+            console.print("[dim]Waiting for you to log in and close the browser...[/dim]")
+            try:
+                await context.wait_for_event("close", timeout=0)
+            except Exception:
+                pass
+
+    asyncio.run(_login())
+    Path(profile_dir, _SESSION_MARKER).touch()
+    console.print(f"[green]Session saved.[/green] Future {provider} requests will run headless.")
 
 
 # ---------------------------------------------------------------------------

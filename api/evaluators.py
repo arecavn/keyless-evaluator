@@ -293,15 +293,34 @@ _MODEL_DETECTION_JS = """
 """
 
 
+_DEFAULT_PROFILE_DIR = os.path.expanduser("~/.local/share/keyless-eval/chatgpt")
+_SESSION_MARKER = "keyless-eval-session"
+
+
+def _chatgpt_profile_dir() -> str:
+    return os.environ.get("CHATGPT_PROFILE_DIR", _DEFAULT_PROFILE_DIR)
+
+
+def _profile_has_session(profile_dir: str) -> bool:
+    """True only when the user has explicitly logged in (sentinel file present)."""
+    return os.path.isfile(os.path.join(profile_dir, _SESSION_MARKER))
+
+
 class ChatGPTWebEvaluator(BaseEvaluator):
     """
-    Evaluate using ChatGPT's public anonymous web interface via Playwright.
+    Evaluate using the ChatGPT web interface via Playwright.
 
-    Headless by default with full stealth fingerprint patching.
-    Set CHATGPT_WEB_HEADLESS=0 for a visible Chrome window.
+    Supports two modes:
+    - **Anonymous** (no profile): temporary dir, always visible or headless per env.
+    - **Logged-in** (persistent profile): set CHATGPT_PROFILE_DIR or use the default
+      (~/.local/share/keyless-eval/chatgpt). Run with CHATGPT_WEB_LOGIN=1 once to
+      open a visible browser, log in manually, then close — the session is saved.
+      Subsequent requests run headless automatically.
 
-    After each response the active model name is read from the ChatGPT UI
-    and returned in the ``model`` field of the response JSON.
+    Env vars:
+      CHATGPT_PROFILE_DIR   Path to persistent Chrome profile (enables logged-in mode)
+      CHATGPT_WEB_LOGIN=1   Force visible window (for first-time login)
+      CHATGPT_WEB_HEADLESS  Override headless: 0=visible, 1=headless (auto if unset)
     """
 
     provider = "chatgpt_web"
@@ -309,46 +328,43 @@ class ChatGPTWebEvaluator(BaseEvaluator):
     def __init__(self, model: str = "auto", timeout: int = 120, headless: bool | None = None):
         self.model = model
         self._timeout = timeout
+        self._profile_dir = _chatgpt_profile_dir()
+        force_login = os.environ.get("CHATGPT_WEB_LOGIN", "").lower() in ("1", "true", "yes")
+
         if headless is None:
-            env_val = os.environ.get("CHATGPT_WEB_HEADLESS", "1")
-            self._headless = env_val.lower() not in ("0", "false", "no")
+            env_val = os.environ.get("CHATGPT_WEB_HEADLESS", "")
+            if env_val:
+                self._headless = env_val.lower() not in ("0", "false", "no")
+            else:
+                # headless only when a saved session exists and login not forced
+                self._headless = _profile_has_session(self._profile_dir) and not force_login
         else:
             self._headless = headless
 
     async def _launch_browser(self, pw):
-        import tempfile, uuid
-        user_data_dir = os.path.join(tempfile.gettempdir(), f"pw-keval-{uuid.uuid4().hex[:8]}")
-        os.makedirs(user_data_dir, exist_ok=True)
-        self._user_data_dir = user_data_dir
+        os.makedirs(self._profile_dir, exist_ok=True)
 
-        if self._headless:
-            try:
-                return await pw.chromium.launch_persistent_context(
-                    user_data_dir, channel="chrome", headless=True,
-                    args=_STEALTH_ARGS, user_agent=_USER_AGENT,
-                )
-            except Exception:
-                pass
-            try:
-                return await pw.chromium.launch_persistent_context(
-                    user_data_dir, headless=True,
-                    args=_STEALTH_ARGS, user_agent=_USER_AGENT,
-                )
-            except Exception:
-                pass
+        args = _STEALTH_ARGS if self._headless else [
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--window-size=1280,800",
+        ]
 
         try:
             return await pw.chromium.launch_persistent_context(
-                user_data_dir, channel="chrome", headless=False,
-                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                self._profile_dir, channel="chrome",
+                headless=self._headless,
+                args=args,
                 user_agent=_USER_AGENT,
             )
         except Exception:
             pass
 
         return await pw.chromium.launch_persistent_context(
-            user_data_dir, headless=False,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+            self._profile_dir,
+            headless=self._headless,
+            args=args,
             user_agent=_USER_AGENT,
         )
 
@@ -380,12 +396,17 @@ class ChatGPTWebEvaluator(BaseEvaluator):
             try:
                 await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=30000)
 
-                title = await page.title()
-                if "just a moment" in title.lower() or "cloudflare" in title.lower():
-                    raise RuntimeError(
-                        "Cloudflare bot-detection triggered. "
-                        "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
-                    )
+                try:
+                    title = await page.title()
+                    if "just a moment" in title.lower() or "cloudflare" in title.lower():
+                        raise RuntimeError(
+                            "Cloudflare bot-detection triggered. "
+                            "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
+                        )
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass
 
                 for dismiss_text in ["Stay logged out", "Start now", "OK"]:
                     try:
@@ -405,30 +426,55 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                 await textarea.wait_for(state="visible", timeout=15000)
                 await textarea.click()
 
-                await page.evaluate(
-                    """(text) => {
-                        const el = document.querySelector('#prompt-textarea');
-                        el.focus();
-                        document.execCommand('selectAll', false, null);
-                        document.execCommand('insertText', false, text);
-                    }""",
-                    full_prompt,
-                )
+                # Write full prompt to system clipboard then paste — avoids dropped
+                # characters and React state sync issues with contenteditable.
+                import subprocess, platform
+                if platform.system() == "Darwin":
+                    subprocess.run(["pbcopy"], input=full_prompt.encode("utf-8"), check=True)
+                    await page.keyboard.press("Meta+v")
+                else:
+                    # Linux fallback: xclip or xdotool
+                    try:
+                        subprocess.run(["xclip", "-selection", "clipboard"],
+                                       input=full_prompt.encode("utf-8"), check=True)
+                    except FileNotFoundError:
+                        subprocess.run(["xdotool", "type", "--clearmodifiers", "--", full_prompt],
+                                       check=True)
+                        await page.wait_for_timeout(300)
+                    else:
+                        await page.keyboard.press("Control+v")
 
+                await page.wait_for_timeout(500)
+
+                # Wait briefly for React to process the typed text before sending
+                await page.wait_for_timeout(500)
+
+                sent = False
                 try:
                     send_btn = page.locator("[data-testid='send-button']").first
                     await send_btn.wait_for(state="visible", timeout=5000)
                     await send_btn.click()
+                    sent = True
                 except Exception:
-                    await page.keyboard.press("Enter")
+                    pass
+
+                if not sent:
+                    # Try keyboard Enter (works when textarea is focused)
+                    await textarea.press("Enter")
+                    await page.wait_for_timeout(200)
 
                 await page.wait_for_timeout(1500)
-                title = await page.title()
-                if "just a moment" in title.lower() or "cloudflare" in title.lower():
-                    raise RuntimeError(
-                        "Cloudflare bot-detection triggered. "
-                        "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
-                    )
+                try:
+                    title = await page.title()
+                    if "just a moment" in title.lower() or "cloudflare" in title.lower():
+                        raise RuntimeError(
+                            "Cloudflare bot-detection triggered. "
+                            "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
+                        )
+                except RuntimeError:
+                    raise
+                except Exception:
+                    pass
 
                 await page.wait_for_function(
                     """() => {
@@ -467,11 +513,6 @@ class ChatGPTWebEvaluator(BaseEvaluator):
 
             finally:
                 await context.close()
-                import shutil
-                try:
-                    shutil.rmtree(getattr(self, "_user_data_dir", ""), ignore_errors=True)
-                except Exception:
-                    pass
 
         if not raw_text:
             raise RuntimeError("ChatGPT returned an empty response.")
@@ -526,6 +567,243 @@ class AnthropicEvaluator(BaseEvaluator):
 
 
 # ---------------------------------------------------------------------------
+# Gemini Web Evaluator — browser automation, no API key required
+# ---------------------------------------------------------------------------
+
+_GEMINI_PROFILE_DIR = os.path.expanduser("~/.local/share/keyless-eval/gemini")
+
+_GEMINI_MODEL_JS = """
+() => {
+    // Try the model-selector button text
+    const selectors = [
+        'bard-mode-switcher button',
+        '[data-test-id="bard-mode-menu-button"]',
+        'model-switcher button',
+        'mat-select[aria-label*="model" i]',
+        '[aria-label*="Gemini" i]',
+    ];
+    for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+            const text = (el.innerText || el.textContent || '').trim();
+            if (text) return text;
+        }
+    }
+    return null;
+}
+"""
+
+
+class GeminiWebEvaluator(BaseEvaluator):
+    """
+    Evaluate using the Gemini web interface (gemini.google.com) via Playwright.
+
+    No API key required. Login once with `keyless-eval login --provider gemini_web`,
+    then all requests run headless using the saved Google session.
+
+    Env vars:
+      GEMINI_PROFILE_DIR    Path to persistent Chrome profile (default: ~/.local/share/keyless-eval/gemini)
+      CHATGPT_WEB_LOGIN=1   Force visible window (for first-time login)
+      CHATGPT_WEB_HEADLESS  Override headless: 0=visible, 1=headless (auto if unset)
+    """
+
+    provider = "gemini_web"
+
+    def __init__(self, model: str = "auto", timeout: int = 120, headless: bool | None = None):
+        self.model = model
+        self._timeout = timeout
+        profile_dir = os.environ.get("GEMINI_PROFILE_DIR", _GEMINI_PROFILE_DIR)
+        self._profile_dir = profile_dir
+        force_login = os.environ.get("CHATGPT_WEB_LOGIN", "").lower() in ("1", "true", "yes")
+
+        if headless is None:
+            env_val = os.environ.get("CHATGPT_WEB_HEADLESS", "")
+            if env_val:
+                self._headless = env_val.lower() not in ("0", "false", "no")
+            else:
+                self._headless = _profile_has_session(profile_dir) and not force_login
+        else:
+            self._headless = headless
+
+    async def _launch_browser(self, pw):
+        os.makedirs(self._profile_dir, exist_ok=True)
+        args = _STEALTH_ARGS if self._headless else [
+            "--no-sandbox",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--window-size=1280,800",
+        ]
+        try:
+            return await pw.chromium.launch_persistent_context(
+                self._profile_dir, channel="chrome",
+                headless=self._headless, args=args, user_agent=_USER_AGENT,
+            )
+        except Exception:
+            return await pw.chromium.launch_persistent_context(
+                self._profile_dir,
+                headless=self._headless, args=args, user_agent=_USER_AGENT,
+            )
+
+    async def evaluate(self, request: EvaluationRequest) -> EvaluationResponse:
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as exc:
+            raise RuntimeError(
+                "playwright not installed. Run:\n"
+                "  uv add playwright\n"
+                "  uv run playwright install chromium"
+            ) from exc
+
+        system = self._system_prompt(request)
+        full_prompt = f"{system}\n\n---\n\n{build_user_prompt(request)}"
+
+        detected_model: str | None = None
+        raw_text = ""
+
+        async with async_playwright() as pw:
+            context = await self._launch_browser(pw)
+            await context.add_init_script(_STEALTH_SCRIPT)
+
+            pages = context.pages
+            page = pages[0] if pages else await context.new_page()
+            page.set_default_timeout(300_000)
+            await page.set_viewport_size({"width": 1280, "height": 800})
+
+            try:
+                await page.goto("https://gemini.google.com/", wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(2000)
+
+                # Try model detection before sending
+                try:
+                    detected_model = await page.evaluate(_GEMINI_MODEL_JS)
+                except Exception:
+                    pass
+
+                # Locate input field — Gemini uses a rich-textarea web component
+                textarea = page.locator("rich-textarea div[contenteditable='true']").first
+                try:
+                    await textarea.wait_for(state="visible", timeout=10000)
+                except Exception:
+                    # Fallback selectors
+                    for sel in ["p[data-placeholder]", "div[contenteditable='true']"]:
+                        try:
+                            textarea = page.locator(sel).first
+                            await textarea.wait_for(state="visible", timeout=5000)
+                            break
+                        except Exception:
+                            pass
+
+                await textarea.click()
+
+                # Write prompt to clipboard and paste
+                import subprocess, platform
+                if platform.system() == "Darwin":
+                    subprocess.run(["pbcopy"], input=full_prompt.encode("utf-8"), check=True)
+                    await page.keyboard.press("Meta+v")
+                else:
+                    try:
+                        subprocess.run(["xclip", "-selection", "clipboard"],
+                                       input=full_prompt.encode("utf-8"), check=True)
+                    except FileNotFoundError:
+                        await textarea.press_sequentially(full_prompt, delay=0)
+                    else:
+                        await page.keyboard.press("Control+v")
+
+                await page.wait_for_timeout(500)
+
+                # Send: try button first, then Enter
+                sent = False
+                for send_sel in [
+                    "button[aria-label='Send message']",
+                    "button.send-button",
+                    "[data-test-id='send-button']",
+                    "button[mattooltip*='Send' i]",
+                ]:
+                    try:
+                        btn = page.locator(send_sel).first
+                        await btn.wait_for(state="visible", timeout=2000)
+                        await btn.click()
+                        sent = True
+                        break
+                    except Exception:
+                        pass
+
+                if not sent:
+                    await textarea.press("Enter")
+
+                # Wait for response — Gemini uses response-container or model-response
+                await page.wait_for_function(
+                    """() => {
+                        const selectors = [
+                            'response-container .markdown',
+                            'model-response .response-content',
+                            '.response-container p',
+                            'message-content .markdown',
+                        ];
+                        for (const sel of selectors) {
+                            const els = document.querySelectorAll(sel);
+                            if (els.length) {
+                                const last = els[els.length - 1];
+                                const text = (last.innerText || '').trim();
+                                if (text.length > 10) return true;
+                            }
+                        }
+                        return false;
+                    }""",
+                    timeout=self._timeout * 1000,
+                )
+
+                # Wait for streaming to finish (send button re-appears or stop button hides)
+                await page.wait_for_timeout(1000)
+                for stop_sel in ["button[aria-label='Stop response']", ".stop-button"]:
+                    try:
+                        await page.locator(stop_sel).wait_for(state="hidden", timeout=30000)
+                        break
+                    except Exception:
+                        pass
+                await page.wait_for_timeout(500)
+
+                # Extract response text
+                raw_text = await page.evaluate("""
+                    () => {
+                        const selectors = [
+                            'response-container .markdown',
+                            'model-response .response-content',
+                            '.response-container p',
+                            'message-content .markdown',
+                        ];
+                        for (const sel of selectors) {
+                            const els = document.querySelectorAll(sel);
+                            if (els.length) {
+                                return els[els.length - 1].innerText || '';
+                            }
+                        }
+                        return '';
+                    }
+                """)
+
+                # Model detection after response
+                if not detected_model:
+                    try:
+                        detected_model = await page.evaluate(_GEMINI_MODEL_JS)
+                    except Exception:
+                        pass
+
+            finally:
+                await context.close()
+
+        if not raw_text:
+            raise RuntimeError("Gemini returned an empty response.")
+
+        scores = parse_evaluation_response(raw_text, request.results)
+        return self._build_response(
+            request, scores,
+            raw_llm_response=raw_text,
+            model_override=detected_model or "gemini-web",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -533,6 +811,7 @@ PROVIDER_MAP: dict[str, type[BaseEvaluator]] = {
     "openai": OpenAIEvaluator,
     "gemini": GeminiEvaluator,
     "chatgpt_web": ChatGPTWebEvaluator,
+    "gemini_web": GeminiWebEvaluator,
     "anthropic": AnthropicEvaluator,
 }
 
@@ -540,6 +819,7 @@ _DEFAULT_MODELS: dict[str, str] = {
     "openai": "gpt-4o",
     "gemini": "gemini-2.0-flash",
     "chatgpt_web": "auto",
+    "gemini_web": "auto",
     "anthropic": "claude-3-5-haiku-20241022",
 }
 
