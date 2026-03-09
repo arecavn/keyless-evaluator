@@ -203,7 +203,16 @@ class GeminiEvaluator(BaseEvaluator):
             ),
         )
 
-        raw = response.text or ""
+        # For thinking models (e.g. gemini-2.5-pro, gemini-2.0-flash-thinking-exp),
+        # parts with thought=True are internal reasoning — skip them, use only output parts.
+        raw = ""
+        try:
+            parts = response.candidates[0].content.parts
+            output_parts = [p.text for p in parts if not getattr(p, "thought", False) and p.text]
+            raw = "\n".join(output_parts) if output_parts else (response.text or "")
+        except Exception:
+            raw = response.text or ""
+
         scores = parse_evaluation_response(raw, request.results)
 
         usage = getattr(response, "usage_metadata", None)
@@ -672,6 +681,30 @@ class GeminiWebEvaluator(BaseEvaluator):
             try:
                 await page.goto("https://gemini.google.com/", wait_until="domcontentloaded", timeout=30000)
                 await page.wait_for_timeout(2000)
+
+                # Model selection — map model param to Gemini web UI labels
+                _MODEL_LABEL_MAP = {
+                    "thinking": "Thinking",
+                    "pro":      "Pro",
+                    "fast":     "Fast",
+                }
+                desired_label = _MODEL_LABEL_MAP.get(self.model.lower() if self.model else "", None)
+                if desired_label:
+                    try:
+                        # Open the model dropdown (the button showing the current mode)
+                        dropdown = page.locator(
+                            "button:has-text('Fast'), button:has-text('Thinking'), button:has-text('Pro')"
+                        ).first
+                        await dropdown.wait_for(state="visible", timeout=5000)
+                        await dropdown.click()
+                        await page.wait_for_timeout(500)
+                        # Click the matching menu item
+                        option = page.get_by_role("menuitem").filter(has_text=desired_label).first
+                        await option.wait_for(state="visible", timeout=3000)
+                        await option.click()
+                        await page.wait_for_timeout(500)
+                    except Exception:
+                        pass  # If selection fails, proceed with current model
 
                 # Try model detection before sending
                 try:

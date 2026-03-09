@@ -58,7 +58,7 @@ def cmd_eval(
     ),
     model: Optional[str] = typer.Option(
         None, "--model", "-m",
-        help="Model override: gemini-2.0-flash (default), gpt-4o, claude-3-5-haiku-20241022, ..."
+        help="Model override: gemini-2.5-pro-preview-03-25, gemini-2.0-flash-thinking-exp, gpt-4o, claude-opus-4-5, ..."
     ),
     detail: bool = typer.Option(
         False, "--detail", "-d",
