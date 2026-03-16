@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import random
+import traceback
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -14,6 +16,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from adapter import adapt_raw_input
 from evaluators import PROVIDER_MAP, _compute_ndcg, get_evaluator
 from models import EvaluationRequest, EvaluationRequestBody, EvaluationResponse, SearchResult
+
+
+# ---------------------------------------------------------------------------
+# Server error logger — writes to logs/server.log
+# ---------------------------------------------------------------------------
+
+_server_logger = logging.getLogger("keyless_evaluator.server")
+_server_logger_ready = False
+
+
+def _ensure_server_logger() -> None:
+    global _server_logger_ready
+    if _server_logger_ready:
+        return
+    log_dir = os.path.join(os.getcwd(), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    handler = logging.FileHandler(os.path.join(log_dir, "server.log"), encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    _server_logger.addHandler(handler)
+    _server_logger.setLevel(logging.DEBUG)
+    _server_logger.propagate = False
+    _server_logger_ready = True
 
 
 def create_app() -> FastAPI:
@@ -163,8 +187,16 @@ def create_app() -> FastAPI:
             return merged
 
         except ValueError as e:
+            _ensure_server_logger()
+            _server_logger.warning("400 ValueError provider=%s model=%s input=%r: %s", provider, model, body.input[:80], e)
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
+            _ensure_server_logger()
+            _server_logger.error(
+                "500 %s provider=%s model=%s input=%r\n%s",
+                type(e).__name__, provider, model, body.input[:80],
+                traceback.format_exc(),
+            )
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/health")

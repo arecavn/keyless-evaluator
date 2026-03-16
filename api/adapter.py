@@ -23,8 +23,9 @@ _TITLE_CANDIDATES = [
 ]
 
 _SNIPPET_CANDIDATES = [
-    "snippet", "jobDescription", "job_description", "description",
-    "summary", "body", "content", "excerpt", "detail", "overview",
+    "snippet", "jobDescription", "job_description", "jobDetail", "job_detail",
+    "jobContent", "job_content", "jobRequirement", "job_requirement",
+    "description", "summary", "body", "content", "excerpt", "detail", "overview",
     "abstract", "text", "shortDescription", "short_description",
 ]
 
@@ -112,7 +113,11 @@ def _scalar_value(val: Any) -> str | None:
         flat = [str(v) for v in val if isinstance(v, (str, int, float, bool))]
         joined = ", ".join(flat)
         return joined[:_MAX_METADATA_VALUE_LEN] if flat else None
-    # Skip plain nested dicts
+    if isinstance(val, dict):
+        # Multilingual dicts like {"vi": "...", "en": "..."} — pick first non-empty string value
+        for v in val.values():
+            if isinstance(v, str) and v.strip():
+                return v.strip()[:_MAX_METADATA_VALUE_LEN]
     return None
 
 
@@ -209,7 +214,12 @@ def adapt_raw_input(
 
         result_id = item.get(id_field, f"result_{i + 1}")
         title = str(item.get(title_field, "")).strip() or f"Result {i + 1}"
-        snippet = str(item.get(snippet_field, "")).strip() if snippet_field else ""
+        # snippet: handle plain strings and multilingual dicts {"vi": "...", "en": "..."}
+        _snippet_raw = item.get(snippet_field) if snippet_field else None
+        if isinstance(_snippet_raw, dict):
+            snippet = next((v.strip() for v in _snippet_raw.values() if isinstance(v, str) and v.strip()), "")
+        else:
+            snippet = str(_snippet_raw or "").strip()
         url_val = item.get(url_field) if url_field else None
         url = str(url_val).strip() if url_val else None
 
