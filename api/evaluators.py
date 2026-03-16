@@ -309,6 +309,7 @@ _MODEL_DETECTION_JS = """
 
 _DEFAULT_PROFILE_DIR = os.path.expanduser("~/.local/share/keyless-eval/chatgpt")
 _SESSION_MARKER = "keyless-eval-session"
+_DEFAULT_CHATGPT_URL = "https://chatgpt.com/"
 
 
 def _build_prompt_header(request: "EvaluationRequest") -> str:
@@ -435,6 +436,12 @@ class ChatGPTWebEvaluator(BaseEvaluator):
         detected_model: str | None = None
         raw_text = ""
 
+        chatgpt_url = os.environ.get("CHATGPT_URL", _DEFAULT_CHATGPT_URL)
+        # Strip /project suffix — navigating to the project root directly opens a new chat
+        if chatgpt_url.rstrip("/").endswith("/project"):
+            chatgpt_url = chatgpt_url.rstrip("/")[: -len("/project")]
+        is_project_url = "/g/g-p-" in chatgpt_url
+
         async with async_playwright() as pw:
             context = await self._launch_browser(pw)
             await context.add_init_script(_STEALTH_SCRIPT)
@@ -445,13 +452,17 @@ class ChatGPTWebEvaluator(BaseEvaluator):
             await page.set_viewport_size({"width": 1280, "height": 800})
 
             try:
+                # Step 1: always land on chatgpt.com first — this establishes the session
+                # and passes Cloudflare reliably before any project navigation
+                _ensure_llm_logger()
                 await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(2000)
 
                 try:
-                    title = await page.title()
-                    if "just a moment" in title.lower() or "cloudflare" in title.lower():
+                    _title = await page.title()
+                    if "just a moment" in _title.lower() or "cloudflare" in _title.lower():
                         raise RuntimeError(
-                            "Cloudflare bot-detection triggered. "
+                            "Cloudflare bot-detection triggered on chatgpt.com. "
                             "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
                         )
                 except RuntimeError:
@@ -467,14 +478,45 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                     except Exception:
                         pass
 
+                # Step 2: if a project URL is configured, navigate there as a second hop
+                # (within an already-established session, so Cloudflare won't challenge)
+                if is_project_url:
+                    _llm_logger.info("chatgpt_web: second-hop to project URL=%s", chatgpt_url)
+                    await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
+                    await page.wait_for_timeout(2000)
+                    _llm_logger.info("chatgpt_web: arrived at URL=%s title=%r", page.url, await page.title())
+
                 # Try to detect the active model before sending (UI is stable at this point)
                 try:
                     detected_model = await page.evaluate(_MODEL_DETECTION_JS)
                 except Exception:
                     pass
 
+                _llm_logger.info("chatgpt_web: looking for textarea, URL=%s", page.url)
                 textarea = page.locator("#prompt-textarea").first
-                await textarea.wait_for(state="visible", timeout=15000)
+                try:
+                    await textarea.wait_for(state="visible", timeout=20000)
+                except Exception:
+                    # Fallback selectors for project or alternate layouts
+                    for sel in [
+                        "div[contenteditable='true'][data-virtualkeyboard-exclusion]",
+                        "div[contenteditable='true']",
+                        "textarea[placeholder]",
+                    ]:
+                        try:
+                            textarea = page.locator(sel).first
+                            await textarea.wait_for(state="visible", timeout=5000)
+                            _llm_logger.info("chatgpt_web: found textarea via fallback selector %r", sel)
+                            break
+                        except Exception:
+                            pass
+                    else:
+                        _llm_logger.error("chatgpt_web: textarea not found. Page title=%s URL=%s", await page.title(), page.url)
+                        raise RuntimeError(
+                            "ChatGPT input field not found. "
+                            "The project page may require login or 'New chat' navigation failed. "
+                            "Check logs/llm.log for details."
+                        )
                 await _fill_contenteditable(page, textarea, full_prompt, self._headless)
                 await page.wait_for_timeout(500)
 
@@ -704,6 +746,8 @@ class GeminiWebEvaluator(BaseEvaluator):
             try:
                 await page.goto("https://gemini.google.com/", wait_until="domcontentloaded", timeout=30000)
                 await page.wait_for_timeout(2000)
+                _ensure_llm_logger()
+                _llm_logger.info("gemini_web: page loaded, model=%s headless=%s", self.model, self._headless)
 
                 # Model selection — map model param to Gemini web UI labels
                 _MODEL_LABEL_MAP = {
@@ -726,8 +770,9 @@ class GeminiWebEvaluator(BaseEvaluator):
                         await option.wait_for(state="visible", timeout=3000)
                         await option.click()
                         await page.wait_for_timeout(500)
-                    except Exception:
-                        pass  # If selection fails, proceed with current model
+                        _llm_logger.info("gemini_web: model switched to %s", desired_label)
+                    except Exception as _me:
+                        _llm_logger.warning("gemini_web: model selection failed for %r: %s", desired_label, _me)
 
                 # Try model detection before sending
                 try:
@@ -773,26 +818,31 @@ class GeminiWebEvaluator(BaseEvaluator):
                     await textarea.press("Enter")
 
                 # Wait for response — Gemini uses response-container or model-response
-                await page.wait_for_function(
-                    """() => {
-                        const selectors = [
-                            'response-container .markdown',
-                            'model-response .response-content',
-                            '.response-container p',
-                            'message-content .markdown',
-                        ];
-                        for (const sel of selectors) {
-                            const els = document.querySelectorAll(sel);
-                            if (els.length) {
-                                const last = els[els.length - 1];
-                                const text = (last.innerText || '').trim();
-                                if (text.length > 10) return true;
+                _llm_logger.info("gemini_web: waiting for response (timeout=%ds)...", self._timeout)
+                try:
+                    await page.wait_for_function(
+                        """() => {
+                            const selectors = [
+                                'response-container .markdown',
+                                'model-response .response-content',
+                                '.response-container p',
+                                'message-content .markdown',
+                            ];
+                            for (const sel of selectors) {
+                                const els = document.querySelectorAll(sel);
+                                if (els.length) {
+                                    const last = els[els.length - 1];
+                                    const text = (last.innerText || '').trim();
+                                    if (text.length > 10) return true;
+                                }
                             }
-                        }
-                        return false;
-                    }""",
-                    timeout=self._timeout * 1000,
-                )
+                            return false;
+                        }""",
+                        timeout=self._timeout * 1000,
+                    )
+                except Exception as _we:
+                    _llm_logger.error("gemini_web: wait_for_function timed out or failed: %s", _we)
+                    raise
 
                 # Wait for streaming to finish (send button re-appears or stop button hides)
                 await page.wait_for_timeout(1000)
@@ -825,6 +875,8 @@ class GeminiWebEvaluator(BaseEvaluator):
                     }
                 """)
 
+                _llm_logger.info("gemini_web: raw_text length=%d", len(raw_text))
+
                 # Model detection after response
                 if not detected_model:
                     try:
@@ -836,6 +888,11 @@ class GeminiWebEvaluator(BaseEvaluator):
                 await context.close()
 
         if not raw_text:
+            _ensure_llm_logger()
+            _llm_logger.error(
+                "provider=gemini_web model=%s EMPTY RESPONSE input=%r detected_model=%r",
+                self.model, request.input[:80], detected_model,
+            )
             raise RuntimeError("Gemini returned an empty response.")
 
         scores = parse_evaluation_response(raw_text, request.results)
