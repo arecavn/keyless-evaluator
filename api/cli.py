@@ -72,6 +72,10 @@ def cmd_eval(
         None, "--context", "-c",
         help="Additional context about the query intent"
     ),
+    tag: Optional[str] = typer.Option(
+        None, "--tag", "-t",
+        help="Short label for web-provider history (e.g. job-eval, candidate-screen, profile-gap)"
+    ),
 ) -> None:
     """
     Evaluate search results for an input using an LLM judge.
@@ -152,6 +156,7 @@ def cmd_eval(
         input=input_text,
         query_context=query_context,
         results=results,
+        tag=tag,
     )
 
     evaluator = get_evaluator(provider, model=model)
@@ -411,7 +416,7 @@ def cmd_login(
 @app.command("serve")
 def cmd_serve(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="API server host address"),
-    port: int = typer.Option(8000, "--port", "-p", help="API server port"),
+    port: int = typer.Option(8510, "--port", "-p", help="API server port"),
 ) -> None:
     """Start the FastAPI HTTP server (for integrating as a microservice)."""
     try:
@@ -423,8 +428,8 @@ def cmd_serve(
     console.print(
         f"\n[bold green]Starting Keyless Evaluator API[/bold green] on [cyan]http://{host}:{port}[/cyan]\n"
         "  [dim]• Endpoint: POST /v1/evaluate[/dim]\n"
-        "  [dim]• Docs:     http://127.0.0.1:8000/docs[/dim]\n"
-        "  [dim]• Health:   http://127.0.0.1:8000/health[/dim]\n"
+        f"  [dim]• Docs:     http://{host}:{port}/docs[/dim]\n"
+        f"  [dim]• Health:   http://{host}:{port}/health[/dim]\n"
     )
 
     uvicorn.run("server:app", host=host, port=port, reload=False)

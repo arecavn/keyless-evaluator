@@ -1,3 +1,3 @@
-lsof -ti:8000 -sTCP:LISTEN|xargs kill
+lsof -ti:8510 -sTCP:LISTEN|xargs kill
 uv run main.py &
 

@@ -7,6 +7,7 @@ import logging
 import math
 import os
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from models import (
     EvaluationRequest,
@@ -81,8 +82,12 @@ class BaseEvaluator(ABC):
     def _system_prompt(self, request: EvaluationRequest) -> str:
         """Return the system prompt. Custom prompts get the output format spec appended."""
         if request.prompt:
-            return request.prompt + OUTPUT_FORMAT
-        return SYSTEM_PROMPT
+            base = request.prompt + OUTPUT_FORMAT
+        else:
+            base = SYSTEM_PROMPT
+        if request.response_language:
+            base += f"\n\nAlways write reason_summary and reason_detail in {request.response_language}."
+        return base
 
     def _build_response(
         self,
@@ -306,13 +311,57 @@ _DEFAULT_PROFILE_DIR = os.path.expanduser("~/.local/share/keyless-eval/chatgpt")
 _SESSION_MARKER = "keyless-eval-session"
 
 
+def _build_prompt_header(request: "EvaluationRequest") -> str:
+    """Return a one-line header for web-provider prompts: '[TAG | YYYY-MM-DD HH:MM:SS]'."""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if request.tag:
+        return f"[{request.tag} | {ts}]\n\n"
+    return f"[{ts}]\n\n"
+
+
 def _chatgpt_profile_dir() -> str:
     return os.environ.get("CHATGPT_PROFILE_DIR", _DEFAULT_PROFILE_DIR)
 
 
 def _profile_has_session(profile_dir: str) -> bool:
-    """True only when the user has explicitly logged in (sentinel file present)."""
-    return os.path.isfile(os.path.join(profile_dir, _SESSION_MARKER))
+    """True when Chrome has written its Default/ profile dir (happens after any first session)."""
+    return os.path.isdir(os.path.join(profile_dir, "Default"))
+
+
+async def _fill_contenteditable(page, locator, text: str, headless: bool) -> None:
+    """
+    Insert text into a contenteditable element, picking the right strategy:
+    - Visible mode: pbcopy/xclip + keyboard paste (reliable, handles any length)
+    - Headless mode: execCommand insertText (system clipboard is inaccessible headlessly)
+    """
+    import subprocess, platform
+
+    if not headless:
+        if platform.system() == "Darwin":
+            subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
+            await locator.click()
+            await page.keyboard.press("Meta+v")
+        else:
+            try:
+                subprocess.run(["xclip", "-selection", "clipboard"],
+                               input=text.encode("utf-8"), check=True)
+                await locator.click()
+                await page.keyboard.press("Control+v")
+            except FileNotFoundError:
+                await locator.click()
+                await locator.press_sequentially(text, delay=0)
+    else:
+        # Headless: execCommand still works and triggers React/contenteditable state
+        await locator.click()
+        await page.evaluate(
+            """(text) => {
+                const el = document.activeElement;
+                el.focus();
+                document.execCommand('selectAll', false, null);
+                document.execCommand('insertText', false, text);
+            }""",
+            text,
+        )
 
 
 class ChatGPTWebEvaluator(BaseEvaluator):
@@ -353,18 +402,11 @@ class ChatGPTWebEvaluator(BaseEvaluator):
     async def _launch_browser(self, pw):
         os.makedirs(self._profile_dir, exist_ok=True)
 
-        args = _STEALTH_ARGS if self._headless else [
-            "--no-sandbox",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-dev-shm-usage",
-            "--window-size=1280,800",
-        ]
-
         try:
             return await pw.chromium.launch_persistent_context(
                 self._profile_dir, channel="chrome",
                 headless=self._headless,
-                args=args,
+                args=_STEALTH_ARGS,
                 user_agent=_USER_AGENT,
             )
         except Exception:
@@ -373,7 +415,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
         return await pw.chromium.launch_persistent_context(
             self._profile_dir,
             headless=self._headless,
-            args=args,
+            args=_STEALTH_ARGS,
             user_agent=_USER_AGENT,
         )
 
@@ -388,7 +430,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
             ) from exc
 
         system = self._system_prompt(request)
-        full_prompt = f"{system}\n\n---\n\n{build_user_prompt(request)}"
+        full_prompt = _build_prompt_header(request) + f"{system}\n\n---\n\n{build_user_prompt(request)}"
 
         detected_model: str | None = None
         raw_text = ""
@@ -433,26 +475,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
 
                 textarea = page.locator("#prompt-textarea").first
                 await textarea.wait_for(state="visible", timeout=15000)
-                await textarea.click()
-
-                # Write full prompt to system clipboard then paste — avoids dropped
-                # characters and React state sync issues with contenteditable.
-                import subprocess, platform
-                if platform.system() == "Darwin":
-                    subprocess.run(["pbcopy"], input=full_prompt.encode("utf-8"), check=True)
-                    await page.keyboard.press("Meta+v")
-                else:
-                    # Linux fallback: xclip or xdotool
-                    try:
-                        subprocess.run(["xclip", "-selection", "clipboard"],
-                                       input=full_prompt.encode("utf-8"), check=True)
-                    except FileNotFoundError:
-                        subprocess.run(["xdotool", "type", "--clearmodifiers", "--", full_prompt],
-                                       check=True)
-                        await page.wait_for_timeout(300)
-                    else:
-                        await page.keyboard.press("Control+v")
-
+                await _fill_contenteditable(page, textarea, full_prompt, self._headless)
                 await page.wait_for_timeout(500)
 
                 # Wait briefly for React to process the typed text before sending
@@ -498,7 +521,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
 
                 try:
                     await page.locator("[data-testid='stop-button']").wait_for(
-                        state="hidden", timeout=60000
+                        state="hidden", timeout=self._timeout * 1000
                     )
                 except Exception:
                     pass
@@ -618,7 +641,7 @@ class GeminiWebEvaluator(BaseEvaluator):
 
     provider = "gemini_web"
 
-    def __init__(self, model: str = "auto", timeout: int = 120, headless: bool | None = None):
+    def __init__(self, model: str = "auto", timeout: int = 300, headless: bool | None = None):
         self.model = model
         self._timeout = timeout
         profile_dir = os.environ.get("GEMINI_PROFILE_DIR", _GEMINI_PROFILE_DIR)
@@ -664,7 +687,7 @@ class GeminiWebEvaluator(BaseEvaluator):
             ) from exc
 
         system = self._system_prompt(request)
-        full_prompt = f"{system}\n\n---\n\n{build_user_prompt(request)}"
+        full_prompt = _build_prompt_header(request) + f"{system}\n\n---\n\n{build_user_prompt(request)}"
 
         detected_model: str | None = None
         raw_text = ""
@@ -726,22 +749,7 @@ class GeminiWebEvaluator(BaseEvaluator):
                         except Exception:
                             pass
 
-                await textarea.click()
-
-                # Write prompt to clipboard and paste
-                import subprocess, platform
-                if platform.system() == "Darwin":
-                    subprocess.run(["pbcopy"], input=full_prompt.encode("utf-8"), check=True)
-                    await page.keyboard.press("Meta+v")
-                else:
-                    try:
-                        subprocess.run(["xclip", "-selection", "clipboard"],
-                                       input=full_prompt.encode("utf-8"), check=True)
-                    except FileNotFoundError:
-                        await textarea.press_sequentially(full_prompt, delay=0)
-                    else:
-                        await page.keyboard.press("Control+v")
-
+                await _fill_contenteditable(page, textarea, full_prompt, self._headless)
                 await page.wait_for_timeout(500)
 
                 # Send: try button first, then Enter
@@ -790,7 +798,9 @@ class GeminiWebEvaluator(BaseEvaluator):
                 await page.wait_for_timeout(1000)
                 for stop_sel in ["button[aria-label='Stop response']", ".stop-button"]:
                     try:
-                        await page.locator(stop_sel).wait_for(state="hidden", timeout=30000)
+                        await page.locator(stop_sel).wait_for(
+                            state="hidden", timeout=self._timeout * 1000
+                        )
                         break
                     except Exception:
                         pass

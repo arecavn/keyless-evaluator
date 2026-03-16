@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import random
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -10,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from adapter import adapt_raw_input
-from evaluators import PROVIDER_MAP, get_evaluator
+from evaluators import PROVIDER_MAP, _compute_ndcg, get_evaluator
 from models import EvaluationRequest, EvaluationRequestBody, EvaluationResponse, SearchResult
 
 
@@ -108,11 +110,58 @@ def create_app() -> FastAPI:
             input=body.input,
             prompt=body.prompt,
             results=results,
+            response_language=body.response_language,
+            tag=body.tag,
         )
 
         try:
             evaluator = get_evaluator(provider=provider, model=model)
-            return await evaluator.evaluate(eval_request)
+
+            if body.batch_size is None or body.batch_size >= len(results):
+                return await evaluator.evaluate(eval_request)
+
+            # Batched evaluation: split results into chunks, merge scores
+            chunks = [
+                results[i : i + body.batch_size]
+                for i in range(0, len(results), body.batch_size)
+            ]
+            all_scores = []
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            last_resp = None
+
+            for i, chunk in enumerate(chunks):
+                if body.sleep is not None:
+                    delay = random.uniform(body.sleep, body.sleep * 2.5) + max(0.0, random.gauss(0, 1.0))
+                    await asyncio.sleep(delay)
+
+                chunk_req = EvaluationRequest(
+                    input=eval_request.input,
+                    prompt=eval_request.prompt,
+                    query_context=eval_request.query_context,
+                    results=chunk,
+                    response_language=eval_request.response_language,
+                    tag=eval_request.tag,
+                )
+                resp = await evaluator.evaluate(chunk_req)
+                all_scores.extend(resp.scores)
+                if resp.prompt_tokens is not None:
+                    total_prompt_tokens += resp.prompt_tokens
+                if resp.completion_tokens is not None:
+                    total_completion_tokens += resp.completion_tokens
+                last_resp = resp
+
+            merged = EvaluationResponse(
+                input=eval_request.input,
+                model=last_resp.model,
+                provider=last_resp.provider,
+                scores=all_scores,
+                prompt_tokens=total_prompt_tokens or None,
+                completion_tokens=total_completion_tokens or None,
+            )
+            merged.ndcg = _compute_ndcg(all_scores)
+            return merged
+
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:

@@ -37,8 +37,8 @@ _URL_CANDIDATES = [
 _SKIP_IN_METADATA = {"_score", "_id", "_index", "_source"}
 
 # Max metadata field count and value length to keep prompts manageable
-_MAX_METADATA_FIELDS = 12
-_MAX_METADATA_VALUE_LEN = 300
+_MAX_METADATA_FIELDS = 20
+_MAX_METADATA_VALUE_LEN = 500
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +88,14 @@ def _first_matching_key(item: dict, candidates: list[str]) -> str:
 def _scalar_value(val: Any) -> str | None:
     """
     Convert a value to a short string suitable for metadata.
-    Returns None if the value is too complex (nested dict) or empty.
+    Returns None if the value is too complex or empty.
+
+    Handles:
+    - Scalars: returned as-is (truncated)
+    - Flat lists: joined with ", "
+    - List-of-dicts with a "name" key: joins the name values
+      e.g. [{"id": 1, "name": "Graphic Design"}, ...] → "Graphic Design, ..."
+    - Pure nested dicts or other complex types: dropped (returns None)
     """
     if val is None:
         return None
@@ -96,11 +103,16 @@ def _scalar_value(val: Any) -> str | None:
         s = str(val).strip()
         return s[:_MAX_METADATA_VALUE_LEN] if s else None
     if isinstance(val, list):
-        # Flatten simple lists (e.g. ["Hà Nội", "Hồ Chí Minh"] → "Hà Nội, Hồ Chí Minh")
+        if val and isinstance(val[0], dict):
+            # List-of-dicts: extract "name" field (e.g. skills array)
+            names = [str(item["name"]).strip() for item in val if isinstance(item, dict) and item.get("name")]
+            joined = ", ".join(names)
+            return joined[:_MAX_METADATA_VALUE_LEN] if joined else None
+        # Flat lists of scalars (e.g. ["Hà Nội", "Hồ Chí Minh"])
         flat = [str(v) for v in val if isinstance(v, (str, int, float, bool))]
         joined = ", ".join(flat)
         return joined[:_MAX_METADATA_VALUE_LEN] if flat else None
-    # Skip nested dicts
+    # Skip plain nested dicts
     return None
 
 

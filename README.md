@@ -1,286 +1,320 @@
 # 🔑 Keyless Evaluator
 
-> **High-quality LLM-as-judge search evaluation — no API key, no account, no credit card.**  
-> Uses ChatGPT's latest model through its public web interface, completely anonymously.  
-> Or plug in Gemini (free 1500 req/day), OpenAI, or Anthropic. Your choice.
+> **LLM-as-judge search quality evaluation — no extra API cost, no new account, no credit card.**
+> Use the ChatGPT or Gemini account you already have. Or use Gemini's free API (1500 req/day).
+> Score search results 0–3, compute nDCG, get human-readable reasons. CLI + REST API.
+
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![uv](https://img.shields.io/badge/managed%20by-uv-purple.svg)](https://docs.astral.sh/uv/)
 
 ---
 
-## ✨ Why This Is Different
+## 🤔 What Does "Keyless" Mean?
 
-Most search evaluation tools require an API key, a paid plan, or both.  
-**Keyless Evaluator doesn't.**
+Most LLM evaluation tools force you to create a new API key, set up billing, and pay per token — on top of what you already pay.
 
-| | Keyless Evaluator | Traditional tools |
+**Keyless Evaluator works with what you already have:**
+
+| If you have... | Use provider | Extra cost |
 |---|---|---|
-| **No API key needed** | ✅ `chatgpt_web` mode | ❌ Always required |
-| **No account needed** | ✅ Fully anonymous | ❌ Always required |
-| **Latest ChatGPT model** | ✅ Auto, always up to date | ❌ Pinned to your tier |
-| **Free Gemini quota** | ✅ 1500 req/day | — |
-| **Paste any search API response** | ✅ `/v1/evaluate/raw` auto-adapts | ❌ Must reformat |
-| **REST API + CLI** | ✅ Both included | Varies |
-| **nDCG scoring** | ✅ Auto-computed | Varies |
+| A ChatGPT Plus/Free account | `chatgpt_web` | **$0 extra** |
+| A Gemini Advanced/Free account | `gemini_web` | **$0 extra** |
+| A Google AI Studio key (free) | `gemini` | **$0** — 1500 req/day free |
+| An OpenAI API key | `openai` | Pay-per-token |
+| An Anthropic API key | `anthropic` | Pay-per-token |
 
-```bash
-# No account. No key. Full ChatGPT quality. Works right now.
-uv run keyless-eval eval -q "remote jobs" -f results.json -p chatgpt_web
-```
+The `chatgpt_web` and `gemini_web` providers drive the **web interface you already use** via a browser — the same one you open at chatgpt.com or gemini.google.com. No new billing. No new account. Your existing subscription, repurposed for evaluation.
 
-> 🔒 **How?** The `chatgpt_web` provider drives ChatGPT's anonymous public web session via
-> Playwright — the same interface anyone can use at [chatgpt.com](https://chatgpt.com) without
-> logging in. ChatGPT serves its latest available model to anonymous users automatically.
+> **True zero-cost path:** `chatgpt_web` works even without a ChatGPT account — it uses the free anonymous public interface.
 
 ---
 
-## What It Does
+## ✨ What It Does
 
-Given a **search query** and a **list of results** (or any raw search API JSON response), the evaluator asks an LLM to judge each result on a **0–3 relevance scale**:
+Given a **search query** and a **list of results** (or any raw search API JSON), the evaluator asks an LLM to judge each result on a **0–3 relevance scale**:
 
 | Score | Label | Meaning |
 |-------|-------|---------|
-| **3** | ★ Highly Relevant | Perfect or near-perfect answer to the query |
-| **2** | ✓ Relevant | Addresses the query but with minor gaps |
+| **3** | ★ Highly Relevant | Perfect or near-perfect match to the query |
+| **2** | ✓ Relevant | Addresses the query, minor gaps |
 | **1** | ~ Marginal | Only tangentially related |
-| **0** | ✗ Irrelevant | No meaningful connection to the query |
+| **0** | ✗ Irrelevant | No meaningful connection |
 
-For each result the LLM returns a **score**, **reason summary**, and **reason detail**.  
-The overall response includes **nDCG**, token usage, and a full JSON export.
+For every result the LLM returns a **score**, **one-sentence summary**, and **detailed justification**.
+The response includes **nDCG**, token usage, provider/model used, and full JSON export.
+
+**Use cases:**
+- 📊 Measure search ranking quality objectively (job search, product search, web search, RAG retrieval)
+- 🔁 CI/CD quality gate — fail pipeline if nDCG drops below threshold
+- 🧪 A/B test ranking algorithms before shipping
+- 🔍 Debug why bad results appear at the top
+- 📋 Audit search APIs from third-party providers
 
 ---
 
-## Quick Start
-
-### 1. Install
+## ⚡ Quick Start
 
 ```bash
-# Requires Python 3.13 + uv
+# Install (Python 3.13 + uv required)
 curl -LsSf https://astral.sh/uv/install.sh | sh
+git clone https://github.com/your-username/keyless-evaluator
+cd keyless-evaluator
 uv sync
-```
 
-### 2. Configure (optional — only needed for API providers)
-
-```bash
-cp .env.example .env
-# Add GEMINI_API_KEY from https://aistudio.google.com/apikey (free, 1500 req/day)
-```
-
-### 3. Generate an example input
-
-```bash
+# Generate sample input
 uv run keyless-eval example
-```
 
-### 4. Evaluate
-
-```bash
-# Default: Gemini API (free quota — set GEMINI_API_KEY in .env)
+# Evaluate — free Gemini API (set GEMINI_API_KEY in .env first)
 uv run keyless-eval eval -q "python async web framework" -f example_results.json
 
-# No account / no key — anonymous ChatGPT web (opens Chrome window)
+# Evaluate — anonymous ChatGPT web (zero setup, zero cost)
 uv run keyless-eval eval -q "python async web framework" -f example_results.json -p chatgpt_web
 
-# Anthropic Claude
-uv run keyless-eval eval -q "python async web framework" -f example_results.json -p anthropic
-
-# With detail panels + save output
-uv run keyless-eval eval -q "python async web framework" -f example_results.json --detail --output scored.json
+# Evaluate — Gemini web (uses your Google account, no API key)
+uv run keyless-eval eval -q "python async web framework" -f example_results.json -p gemini_web
 ```
 
 ---
 
-## Providers
+## 🚀 Providers
 
-| Provider | Default Model | Env Variable | Notes |
-|---|---|---|---|
-| `gemini` *(default)* | `gemini-2.0-flash` | `GEMINI_API_KEY` | **Free** 1500 req/day via [Google AI Studio](https://aistudio.google.com/apikey) |
-| `chatgpt_web` | `auto` | None | Anonymous ChatGPT web via Playwright. No account or key needed. |
-| `openai` | `gpt-4o` | `OPENAI_API_KEY` | Direct OpenAI API |
-| `anthropic` | `claude-3-5-haiku-20241022` | `ANTHROPIC_API_KEY` | Anthropic Claude API |
+| Provider | Model | Auth | Cost | Notes |
+|---|---|---|---|---|
+| `gemini` *(default)* | `gemini-2.0-flash` | `GEMINI_API_KEY` | **Free** 1500 req/day | Get key at [Google AI Studio](https://aistudio.google.com/apikey) |
+| `chatgpt_web` | auto-detected | None / ChatGPT login | **$0 extra** | Anonymous or logged-in. Uses your existing ChatGPT account. |
+| `gemini_web` | auto-detected | Google login | **$0 extra** | Uses your existing Google/Gemini account. |
+| `openai` | `gpt-4o` | `OPENAI_API_KEY` | Pay-per-token | Direct OpenAI API |
+| `anthropic` | `claude-3-5-haiku-20241022` | `ANTHROPIC_API_KEY` | Pay-per-token | Anthropic Claude API |
+
+### Model overrides
 
 ```bash
-uv run keyless-eval providers   # see full table with notes
+# Gemini API — use Pro or Flash
+uv run keyless-eval eval -q "..." -f results.json -p gemini -m gemini-2.5-pro-preview-03-25
+uv run keyless-eval eval -q "..." -f results.json -p gemini -m gemini-2.0-flash
+
+# Gemini Web — switch between Fast / Pro / Thinking in the UI
+uv run keyless-eval eval -q "..." -f results.json -p gemini_web -m pro
+uv run keyless-eval eval -q "..." -f results.json -p gemini_web -m fast
+uv run keyless-eval eval -q "..." -f results.json -p gemini_web -m thinking
+
+# OpenAI
+uv run keyless-eval eval -q "..." -f results.json -p openai -m gpt-4o-mini
+
+# Anthropic
+uv run keyless-eval eval -q "..." -f results.json -p anthropic -m claude-opus-4-5
+```
+
+### Login once for web providers
+
+```bash
+# Save your ChatGPT or Gemini session (run once, then all future calls are headless)
+uv run keyless-eval login -p chatgpt_web
+uv run keyless-eval login -p gemini_web
 ```
 
 ---
 
-## REST API
+## 📥 Input Formats
 
-Start the HTTP server and integrate with any service:
-
-```bash
-uv run main.py
-# → http://127.0.0.1:8000
-# → Docs: http://127.0.0.1:8000/docs
-
-uv run main.py --host 0.0.0.0 --port 8080   # custom bind
-uv run main.py --reload                       # dev mode
-```
-
-### Standard input (structured results list)
-
-```bash
-curl -s -X POST "http://127.0.0.1:8000/v1/evaluate?provider=gemini" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "python async web framework",
-    "results": [
-      {"id": "r1", "title": "FastAPI", "snippet": "Modern async web framework for Python"},
-      {"id": "r2", "title": "Django", "snippet": "Full-stack web framework for Python"},
-      {"id": "r3", "title": "Best Chili Recipe", "snippet": "Spicy chili with beans"}
-    ]
-  }' | python3 -m json.tool
-```
-
-### Dynamic raw input — paste any search API response directly
-
-No reformatting needed. Paste your search API's JSON output verbatim:
-
-```bash
-curl -s -X POST "http://127.0.0.1:8000/v1/evaluate/raw?provider=gemini" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "remote jobs",
-    "raw": { ...your full search API JSON response... }
-  }' | python3 -m json.tool
-```
-
-The adapter **auto-detects** the results array (`data`, `results`, `hits`, etc.) and common field names (`id`, `jobTitle`/`title`/`name`, `jobDescription`/`description`/`snippet`).
-
-**With explicit mapping** (for non-standard field names):
-
-```bash
-curl -s -X POST "http://127.0.0.1:8000/v1/evaluate/raw?provider=gemini" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "remote jobs",
-    "max_results": 10,
-    "raw": { ...your search API JSON... },
-    "mapping": {
-      "data_path": "data",
-      "id_field": "id",
-      "title_field": "jobTitle",
-      "snippet_field": "jobDescription",
-      "metadata_fields": ["company", "salary", "location", "employmentTypeEn"]
-    }
-  }' | python3 -m json.tool
-```
-
-### Health check
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
----
-
-## Input Format
-
-### Standard (`/v1/evaluate`)
-
-JSON array of results, or `{"results": [...]}` wrapper:
+### Structured results (CLI / API)
 
 ```json
 [
   {
-    "id": "doc_001",
+    "id": "r1",
     "title": "FastAPI Documentation",
-    "snippet": "Modern, fast web framework for building APIs with Python",
+    "snippet": "Modern async web framework for Python",
     "url": "https://fastapi.tiangolo.com/",
-    "metadata": {"category": "web-framework", "language": "Python"}
+    "metadata": {"category": "web-framework", "stars": "75k"}
   }
 ]
 ```
 
 Required: `id`, `title`. Optional: `snippet`, `url`, `metadata`.
 
-Pipe from stdin:
+### Raw search API response — paste directly, zero reformatting
+
+Works with any search API output. Auto-detects result arrays (`data`, `hits`, `results`, `items`, `docs`, `records`, `jobs`) and field names (`title`/`jobTitle`/`name`, `description`/`snippet`/`jobDescription`, etc.).
+
+```json
+{
+  "input": "remote python jobs",
+  "output": { ...your raw search API JSON response... },
+  "mapping": {
+    "title_field": "jobTitle",
+    "snippet_field": "jobDescription",
+    "metadata_fields": ["company", "salary", "location"]
+  }
+}
+```
+
+---
+
+## 🌐 REST API
+
 ```bash
-cat my_results.json | uv run keyless-eval eval -q "my search query"
+# Start server (default: http://127.0.0.1:8510)
+uv run main.py
+uv run main.py --host 0.0.0.0 --port 8080  # custom bind
+uv run main.py --reload                      # dev mode
+
+# Docs at http://127.0.0.1:8510/docs
 ```
 
-### Dynamic raw (`/v1/evaluate/raw`)
+### Evaluate endpoint
 
-Any JSON body your search API returns. Supported auto-detected array keys: `data`, `results`, `hits`, `items`, `docs`, `records`, `jobs`.
+```bash
+curl -X POST "http://127.0.0.1:8510/v1/evaluate?provider=gemini" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "python async web framework",
+    "output": [
+      {"id": "r1", "title": "FastAPI", "snippet": "Modern async Python web framework"},
+      {"id": "r2", "title": "Django", "snippet": "Full-stack Python web framework"},
+      {"id": "r3", "title": "Best Chili Recipe", "snippet": "Spicy chili with beans"}
+    ]
+  }'
+```
+
+### Advanced options
+
+```bash
+# Custom scoring prompt (replace built-in rubric with your own)
+curl -X POST "http://127.0.0.1:8510/v1/evaluate?provider=gemini" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": "Senior Python developer Hanoi",
+    "output": { ...job search API response... },
+    "prompt": "Score how well this job matches the candidate. 3=perfect, 0=no match.",
+    "mapping": {"title_field": "jobTitle", "snippet_field": "jobDescription"},
+    "response_language": "Vietnamese",
+    "batch_size": 1,
+    "sleep": 3,
+    "tag": "job-eval"
+  }'
+```
+
+| Option | Description |
+|---|---|
+| `prompt` | Replace built-in TREC rubric with your own scoring criteria |
+| `response_language` | Get reason/summary in your language (`"Vietnamese"`, `"Japanese"`, etc.) |
+| `batch_size` | Evaluate N results per LLM call (use `1` for maximum accuracy on field-rich objects) |
+| `sleep` | Jitter delay between batch calls in seconds — recommended for web providers to avoid bot detection |
+| `tag` | Short label shown at the top of Gemini/ChatGPT messages for history identification (e.g. `"job-eval"`, `"candidate-screen"`) |
+| `max_results` | Cap how many results to evaluate (default: 20) |
+
+### Sample response
+
+```json
+{
+  "input": "python async web framework",
+  "model": "gemini-2.0-flash",
+  "provider": "gemini",
+  "ndcg": 0.9243,
+  "prompt_tokens": 512,
+  "completion_tokens": 256,
+  "scores": [
+    {
+      "result_id": "r1",
+      "title": "FastAPI",
+      "score": 3,
+      "reason_summary": "FastAPI is a leading Python async web framework — perfect match.",
+      "reason_detail": "The result directly addresses the query for a Python async web framework. FastAPI is built on async-first principles using ASGI and is the most popular choice for high-performance async Python APIs."
+    },
+    {
+      "result_id": "r3",
+      "title": "Best Chili Recipe",
+      "score": 0,
+      "reason_summary": "Completely unrelated to Python web frameworks.",
+      "reason_detail": "This result is a cooking recipe with no connection to programming or web frameworks."
+    }
+  ]
+}
+```
 
 ---
 
-## Python API
-
-```python
-import asyncio
-from keyless_evaluator.models import EvaluationRequest, SearchResult
-from keyless_evaluator.evaluators import get_evaluator
-
-request = EvaluationRequest(
-    query="python async web framework",
-    results=[
-        SearchResult(id="1", title="FastAPI", snippet="Fast Python web framework"),
-        SearchResult(id="2", title="Django", snippet="The web framework for perfectionists"),
-    ],
-)
-
-evaluator = get_evaluator("gemini")  # or "openai", "anthropic", "chatgpt_web"
-response = asyncio.run(evaluator.evaluate(request))
-
-for score in response.scores:
-    print(f"{score.score.value}/3 — {score.title}: {score.reason_summary}")
-
-print(f"nDCG: {response.ndcg:.4f}")
-```
-
----
-
-## CLI Commands
+## 💻 CLI Reference
 
 ```
-keyless-eval eval        Evaluate search results (main command)
+keyless-eval eval        Evaluate search results
 keyless-eval detail      Show detailed reasoning for a saved result
-keyless-eval example     Generate a sample results.json
-keyless-eval providers   List available LLM providers
-keyless-eval serve       Start the FastAPI HTTP server (or: uv run main.py)
+keyless-eval example     Generate a sample results.json to get started
+keyless-eval providers   List all providers with notes
+keyless-eval login       Save browser session for chatgpt_web / gemini_web
+keyless-eval serve       Start the FastAPI HTTP server
 ```
 
-### `eval` options
+### `eval` flags
 
-| Flag | Description |
-|------|-------------|
-| `-q, --query` | Search query (required) |
-| `-f, --file` | JSON results file (or pipe via stdin) |
-| `-p, --provider` | `gemini` \| `chatgpt_web` \| `openai` \| `anthropic` |
-| `-m, --model` | Model name override |
-| `-d, --detail` | Show detailed reasoning panels |
-| `-o, --output` | Save full evaluation JSON |
-| `-c, --context` | Extra context about query intent |
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--input` | `-q` | Search query / evaluation criterion (required) |
+| `--file` | `-f` | JSON results file (or pipe via stdin) |
+| `--provider` | `-p` | `gemini` \| `chatgpt_web` \| `gemini_web` \| `openai` \| `anthropic` |
+| `--model` | `-m` | Model override (e.g. `pro`, `thinking`, `gpt-4o-mini`) |
+| `--tag` | `-t` | Label for web-provider chat history (e.g. `job-eval`, `screening`) |
+| `--detail` | `-d` | Show detailed reasoning panels per result |
+| `--output` | `-o` | Save full JSON to file |
+| `--context` | `-c` | Extra context about query intent |
+
+```bash
+# Pipe results from another command
+curl -s "https://your-search-api.com/search?q=remote+python+jobs" | \
+  uv run keyless-eval eval -q "remote python jobs" -p gemini_web -t job-eval
+
+# Save output and view details
+uv run keyless-eval eval -q "..." -f results.json --detail --output scored.json
+uv run keyless-eval detail scored.json 2   # show detail for result at index 2
+```
 
 ---
 
-## Project Structure
+## 🔧 Setup & Configuration
+
+```bash
+cp .env.example .env
+```
+
+```env
+# Free — get from https://aistudio.google.com/apikey
+GEMINI_API_KEY=AI...
+
+# Optional — only needed for paid API providers
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+
+# REST API — CORS origins (comma-separated, defaults to * for local dev)
+ALLOWED_ORIGINS=https://your-app.com
+```
+
+---
+
+## 🏗️ Architecture
 
 ```
-keyless_evaluator/
-├── cli.py          # Typer CLI (eval, detail, example, providers, serve)
-├── models.py       # Pydantic models (RelevanceScore, SearchResult, EvaluationRequest/Response, RawEvaluationRequest)
-├── prompts.py      # LLM prompt templates
-├── parser.py       # Parse LLM JSON responses (fence-stripping, fallback scoring)
-├── evaluators.py   # LLM backends: Gemini, OpenAI, Anthropic, ChatGPTWeb + factory
-├── adapter.py      # Dynamic raw JSON input adapter (dot-path resolver, auto field detection)
-├── renderer.py     # Rich terminal output: tables, detail panels, nDCG stats
-└── server.py       # FastAPI app: POST /v1/evaluate, POST /v1/evaluate/raw, GET /health
+api/
+├── cli.py          Typer CLI — eval, detail, example, providers, login, serve
+├── models.py       Pydantic models — RelevanceScore (0–3), SearchResult, EvaluationRequest/Response
+├── prompts.py      LLM prompt templates — SYSTEM_PROMPT + build_user_prompt()
+├── parser.py       Parse LLM JSON output — fence stripping, fallback scoring
+├── evaluators.py   Backends — GeminiEvaluator, OpenAIEvaluator, ChatGPTWebEvaluator, GeminiWebEvaluator, AnthropicEvaluator
+├── adapter.py      Dynamic JSON adapter — dot-path resolver, auto field detection
+├── renderer.py     Rich terminal output — tables, detail panels, nDCG stats
+└── server.py       FastAPI REST API — POST /v1/evaluate, GET /health
 
 .agents/skills/
-├── api-design/SKILL.md          # API input/output standards, validation, error format
-├── security/SKILL.md            # Security: secrets, CORS, headers, rate limiting
-├── performance/SKILL.md         # Async patterns, concurrency, caching, cold-start
-└── business-requirements/SKILL.md  # Provider policy, cost, nDCG thresholds, SLA
-
-vercel.json          # Vercel serverless deployment
-requirements.txt     # Pip-compatible deps for Vercel Python runtime
+├── api-design/            REST API design standards
+├── business-requirements/ Provider policy, nDCG thresholds, integration patterns
+├── performance/           Async patterns, caching, cold-start optimization
+└── security/              CORS, secrets, rate limiting, headers
 ```
 
 ---
 
-## Vercel Deployment
+## ☁️ Vercel Deployment
 
 ```bash
 npm i -g vercel
@@ -289,17 +323,41 @@ vercel env add ALLOWED_ORIGINS   # e.g. https://your-app.com
 vercel deploy --prod
 ```
 
-> **Note**: The `chatgpt_web` provider uses Playwright and cannot run on Vercel Lambda. Use `gemini`, `openai`, or `anthropic` in serverless deployments.
+> **Note:** `chatgpt_web` and `gemini_web` use Playwright (browser automation) and cannot run on serverless. Use `gemini`, `openai`, or `anthropic` for Vercel deployments.
 
 ---
 
-## Development
+## 🧪 Development
 
 ```bash
-uv sync                          # install deps
-uv run pytest tests/ -v         # run tests
-uv run main.py                   # start local server
+uv sync                    # install deps
+uv run pytest tests/ -v    # run tests
+uv run main.py             # start local server at :8510
 ```
 
-> **macOS note**: If `.venv` creation fails (sandbox restriction), set:
+> **macOS note:** If `.venv` creation fails inside the project dir, set:
 > `export UV_PROJECT_ENVIRONMENT=/tmp/keyless-eval-venv`
+
+---
+
+## 🔍 How the Web Providers Work
+
+`chatgpt_web` and `gemini_web` use [Playwright](https://playwright.dev/) to control a real Chrome browser window — the same way you'd use ChatGPT or Gemini manually. No scraping, no unofficial API.
+
+- **Anonymous mode** (`chatgpt_web`): opens a temporary Chrome session, no login needed
+- **Logged-in mode**: run `keyless-eval login` once to save your session, then all future calls run headless automatically
+- **Bot detection**: the evaluator uses real Chrome with stealth patches, randomized delays, and human-like jitter between requests
+
+---
+
+## 📄 License
+
+MIT — free to use, modify, and distribute.
+
+---
+
+<!-- GitHub Topics (add these in your repo Settings → Topics):
+llm-as-judge, search-evaluation, ndcg, information-retrieval, search-quality,
+relevance-scoring, rag-evaluation, retrieval-evaluation, llm, gemini, chatgpt,
+openai, anthropic, fastapi, playwright, search-ranking, python, cli, rest-api
+-->

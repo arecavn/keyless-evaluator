@@ -12,3 +12,16 @@ dist/
 
 # LLM trace logs
 logs/
+
+# Claude Code project config
+.claude/
+
+# Playwright browser session profiles (contain personal login cookies)
+chatgpt_profile/
+gemini_profile/
+*.session/
+
+# Personal / company test data
+*_private*.json
+*_company*.json
+*_test_data.json

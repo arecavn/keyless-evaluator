@@ -93,6 +93,14 @@ class EvaluationRequest(BaseModel):
     )
     query_context: str | None = Field(default=None, description="Extra context about the query intent")
     results: list[SearchResult] = Field(description="The ordered list of results to evaluate")
+    response_language: str | None = Field(
+        default=None,
+        description="When set, the LLM writes reason_summary and reason_detail in this language (e.g. 'Vietnamese', 'Japanese').",
+    )
+    tag: str | None = Field(
+        default=None,
+        description="Short label prepended to web-provider prompts for history identification.",
+    )
 
 
 class EvaluationResponse(BaseModel):
@@ -198,4 +206,37 @@ class EvaluationRequestBody(BaseModel):
     max_results: int = Field(
         default=20, ge=1, le=100,
         description="Max results to evaluate (JSON output only).",
+    )
+    response_language: str | None = Field(
+        default=None,
+        description=(
+            "Language for reason_summary and reason_detail. "
+            "E.g. 'Vietnamese', 'Japanese', 'French'. Defaults to English when omitted."
+        ),
+    )
+    batch_size: int | None = Field(
+        default=None, ge=1,
+        description=(
+            "When set, results are split into chunks of this size and evaluated in separate "
+            "LLM calls. All scores are merged into a single response. "
+            "Use batch_size=1 for maximum accuracy on field-rich objects."
+        ),
+    )
+    sleep: float | None = Field(
+        default=None, ge=0,
+        description=(
+            "Base sleep seconds between batch chunk calls. "
+            "Actual delay = uniform(sleep, sleep×2.5) + gaussian_jitter(σ=1s, min=0). "
+            "Recommended for web providers (gemini_web, chatgpt_web) to avoid bot detection. "
+            "E.g. sleep=2 → actual ~2–6s per call with human-like irregularity."
+        ),
+    )
+    tag: str | None = Field(
+        default=None,
+        description=(
+            "Short label prepended to the prompt for web-provider chat history identification. "
+            "E.g. 'job-eval', 'candidate-screen', 'profile-gap', 'screening'. "
+            "Shows as '[TAG | 2024-03-15 14:32:10]' at the top of each Gemini/ChatGPT message, "
+            "making different eval types easy to distinguish in chat history."
+        ),
     )
