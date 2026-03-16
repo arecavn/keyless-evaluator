@@ -67,6 +67,7 @@ class SearchResult(BaseModel):
     id: str | int = Field(description="Unique identifier")
     title: str = Field(description="Title or headline")
     snippet: str = Field(default="", description="Short excerpt or description")
+    snippet_label: str = Field(default="Snippet", description="Original field name shown in the prompt (e.g. 'jobDescription', 'description')")
     url: str | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

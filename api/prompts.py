@@ -65,7 +65,8 @@ def build_user_prompt(req: EvaluationRequest) -> str:
         lines.append(f"- **ID**: {result.id}")
         lines.append(f"- **Title**: {result.title}")
         if result.snippet:
-            lines.append(f"- **Snippet**: {result.snippet}")
+            label = result.snippet_label or "Snippet"
+            lines.append(f"- **{label}**: {result.snippet}")
         if result.url:
             lines.append(f"- **URL**: {result.url}")
         if result.metadata:
