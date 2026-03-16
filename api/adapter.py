@@ -37,9 +37,9 @@ _URL_CANDIDATES = [
 # Fields we never include in metadata (they're already mapped or are internal)
 _SKIP_IN_METADATA = {"_score", "_id", "_index", "_source"}
 
-# Max metadata field count and value length to keep prompts manageable
+# Max metadata field count — no value length cap (preserve original content)
 _MAX_METADATA_FIELDS = 20
-_MAX_METADATA_VALUE_LEN = 500
+_MAX_METADATA_VALUE_LEN = None  # no truncation
 
 
 # ---------------------------------------------------------------------------
@@ -102,22 +102,20 @@ def _scalar_value(val: Any) -> str | None:
         return None
     if isinstance(val, (str, int, float, bool)):
         s = str(val).strip()
-        return s[:_MAX_METADATA_VALUE_LEN] if s else None
+        return s if s else None
     if isinstance(val, list):
         if val and isinstance(val[0], dict):
             # List-of-dicts: extract "name" field (e.g. skills array)
             names = [str(item["name"]).strip() for item in val if isinstance(item, dict) and item.get("name")]
-            joined = ", ".join(names)
-            return joined[:_MAX_METADATA_VALUE_LEN] if joined else None
+            return ", ".join(names) if names else None
         # Flat lists of scalars (e.g. ["Hà Nội", "Hồ Chí Minh"])
         flat = [str(v) for v in val if isinstance(v, (str, int, float, bool))]
-        joined = ", ".join(flat)
-        return joined[:_MAX_METADATA_VALUE_LEN] if flat else None
+        return ", ".join(flat) if flat else None
     if isinstance(val, dict):
         # Multilingual dicts like {"vi": "...", "en": "..."} — pick first non-empty string value
         for v in val.values():
             if isinstance(v, str) and v.strip():
-                return v.strip()[:_MAX_METADATA_VALUE_LEN]
+                return v.strip()
     return None
 
 
@@ -235,8 +233,9 @@ def adapt_raw_input(
 
         results.append(SearchResult(
             id=result_id,
-            title=title[:500],        # enforce model max
-            snippet=snippet[:2000],   # enforce model max
+            title=title,
+            snippet=snippet,
+            snippet_label=snippet_field or "Snippet",
             url=url,
             metadata=meta,
         ))
