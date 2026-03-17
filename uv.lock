@@ -506,6 +506,15 @@ wheels = [
 ]
 
 [[package]]
+name = "json-repair"
+version = "0.58.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/76/70/484f97a744d2614218a2b162004accda3f3c4ccc8c5d688712624567ebec/json_repair-0.58.6.tar.gz", hash = "sha256:aa740113a1c9dede4ba84c29aa8f81493253aede6f0e4edde9a560ec4b1d7762", size = 44804, upload-time = "2026-03-16T13:43:34.722Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/bb/c019ac05a6923c5776fa134c65e5b19d216ef17227618d93b1f608bc2806/json_repair-0.58.6-py3-none-any.whl", hash = "sha256:e438a1e4ea03179dfe9a05dfd738e678e888f1ea5b4a40398f8f220925df1c5c", size = 43482, upload-time = "2026-03-16T13:43:33.569Z" },
+]
+
+[[package]]
 name = "keyless-evaluator"
 version = "0.1.0"
 source = { editable = "." }
@@ -516,6 +525,7 @@ dependencies = [
     { name = "google-generativeai" },
     { name = "httpx", extra = ["http2"] },
     { name = "jinja2" },
+    { name = "json-repair" },
     { name = "openai" },
     { name = "playwright" },
     { name = "pydantic" },
@@ -539,6 +549,7 @@ requires-dist = [
     { name = "google-generativeai", specifier = ">=0.8.0" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.27.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
+    { name = "json-repair", specifier = ">=0.58.6" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "playwright", specifier = ">=1.58.0" },
     { name = "pydantic", specifier = ">=2.0.0" },

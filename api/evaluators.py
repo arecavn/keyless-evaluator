@@ -278,6 +278,15 @@ _STEALTH_ARGS = [
     "--disable-features=IsolateOrigins,site-per-process",
     "--disable-web-security",
     "--lang=en-US,en",
+    # Docker / Linux: disable GPU hardware acceleration (no GPU available in containers).
+    # Without this, the GPU process crashes and can take down the whole browser.
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--use-gl=swiftshader",
+    # Prevent Chrome from crashing when it can't decrypt macOS Keychain tokens
+    # (happens when a Mac profile is loaded on Linux inside Docker).
+    "--disable-sync",
+    "--disable-background-networking",
 ]
 
 _USER_AGENT = (

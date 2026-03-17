@@ -45,11 +45,21 @@ def parse_evaluation_response(
     try:
         items: list[dict] = json.loads(json_text)
     except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"LLM did not return valid JSON.\n"
-            f"--- Raw output ---\n{raw}\n"
-            f"--- Parse error ---\n{exc}"
-        ) from exc
+        # LLM sometimes embeds unescaped quotes inside strings (e.g. jobTitle "Foo Bar").
+        # Try json-repair as a fallback before giving up.
+        try:
+            from json_repair import repair_json
+            repaired = repair_json(json_text, return_objects=True)
+            if isinstance(repaired, list):
+                items = repaired
+            else:
+                raise ValueError("repair did not produce a list")
+        except Exception:
+            raise ValueError(
+                f"LLM did not return valid JSON.\n"
+                f"--- Raw output ---\n{raw}\n"
+                f"--- Parse error ---\n{exc}"
+            ) from exc
 
     # Build a lookup by result_id (string-coerced for safety)
     parsed: dict[str, dict] = {str(item.get("result_id", "")): item for item in items}

@@ -1,0 +1,104 @@
+{
+  "data": [
+    {
+      "id": "job_001",
+      "jobTitle": "Senior Python Backend Engineer",
+      "company": "TechCorp Vietnam",
+      "location": "Hà Nội",
+      "salary": "$2000 - $3500",
+      "jobDescription": "We are looking for a Senior Python Backend Engineer to join our growing engineering team. You will be responsible for designing, building, and maintaining high-performance backend services that power our core product. Our platform handles millions of requests per day, and you will play a critical role in ensuring scalability, reliability, and performance.\n\nYou will work closely with frontend engineers, data scientists, and product managers to deliver features that delight our users. We follow an agile development process with two-week sprints and encourage a culture of continuous improvement.\n\nKey responsibilities include: architecting and implementing RESTful APIs and microservices using Python (FastAPI/Django), optimizing database queries and data pipelines, conducting code reviews and mentoring junior engineers, participating in system design discussions, writing unit and integration tests, deploying and monitoring services on AWS/GCP, and contributing to our engineering culture and best practices.\n\nWe value engineers who take ownership of their work, communicate clearly, and are passionate about building systems that scale. This is a senior role, so you will be expected to make technical decisions independently and guide the team.",
+      "jobRequirement": "Required: 5+ years of professional Python development experience. Strong understanding of async Python (asyncio, FastAPI). Hands-on experience with PostgreSQL or MySQL at scale. Proficiency with Docker and Kubernetes. Experience with message queues (Kafka, RabbitMQ, or Redis Streams). Solid understanding of REST API design principles and OpenAPI/Swagger. Familiarity with CI/CD pipelines (GitHub Actions, Jenkins). Strong problem-solving skills and ability to debug complex distributed systems.\n\nNice to have: Experience with Elasticsearch or OpenSearch. Knowledge of gRPC and Protocol Buffers. Contributions to open-source Python projects. Experience in a startup or fast-paced environment. Familiarity with ML model serving (TorchServe, BentoML).\n\nSoft skills: Strong written and verbal communication in English. Ability to work independently and in a cross-functional team. Growth mindset and willingness to learn new technologies.",
+      "url": "https://example.com/jobs/job_001"
+    },
+    {
+      "id": "job_002",
+      "jobTitle": "Data Engineer (Python/Spark)",
+      "company": "DataFlow Inc",
+      "location": "Hồ Chí Minh",
+      "salary": "$1800 - $3000",
+      "jobDescription": "DataFlow Inc is building the next generation of real-time data infrastructure for enterprise clients across Southeast Asia. We are hiring a Data Engineer with strong Python and Apache Spark skills to help us design and operate large-scale data pipelines.\n\nIn this role, you will design and implement batch and streaming ETL pipelines using PySpark and Apache Kafka. You will work with our data architecture team to define schemas, data contracts, and storage strategies. You will also be responsible for data quality monitoring, alerting, and documentation.\n\nOur data platform processes terabytes of event data daily from hundreds of clients. You will have the opportunity to work on challenging problems related to data freshness, exactly-once processing semantics, and efficient storage with Delta Lake / Apache Iceberg.\n\nYou will collaborate with analytics engineers and BI teams to ensure data is available in the right format at the right time. We use dbt for transformations and Airflow for orchestration, and you will be expected to contribute to both.",
+      "jobRequirement": "Required: 3+ years of experience as a Data Engineer. Proficiency in Python and PySpark. Experience with Apache Airflow for pipeline orchestration. Strong SQL skills with experience in columnar databases (BigQuery, Redshift, or Snowflake). Familiarity with streaming systems (Kafka, Flink, or Spark Structured Streaming). Understanding of data modeling concepts (star schema, OBT, etc.).\n\nNice to have: Experience with Delta Lake or Apache Iceberg. Knowledge of dbt (data build tool). Familiarity with data observability tools (Monte Carlo, Great Expectations). Experience in a multi-tenant SaaS environment.\n\nRequirements: Bachelor's degree in Computer Science, Engineering, or related field. Strong analytical and problem-solving ability. Good communication skills in English.",
+      "url": "https://example.com/jobs/job_002"
+    },
+    {
+      "id": "job_003",
+      "jobTitle": "Machine Learning Engineer",
+      "company": "AI Solutions Ltd",
+      "location": "Đà Nẵng (Remote OK)",
+      "salary": "$2500 - $4000",
+      "jobDescription": "AI Solutions Ltd is an AI-first company building intelligent automation products for the logistics and supply chain industry. We are looking for a Machine Learning Engineer to join our applied ML team.\n\nYou will work on the full ML lifecycle: from data exploration and feature engineering, through model training and evaluation, to deployment and monitoring in production. You will collaborate with domain experts to understand business problems and translate them into ML solutions.\n\nCurrent projects include: demand forecasting models using time-series transformers, anomaly detection for shipment tracking, and NLP models for document classification. You will have access to modern ML infrastructure including GPU clusters, MLflow for experiment tracking, and a feature store built on Feast.\n\nWe care deeply about model quality, fairness, and explainability. You will be expected to write model cards, conduct bias evaluations, and implement monitoring dashboards for deployed models. We encourage publication of research and participation in industry conferences.",
+      "jobRequirement": "Required: 3+ years of experience in applied machine learning. Strong Python skills with PyTorch or TensorFlow. Experience training and fine-tuning transformer models (BERT, T5, LLaMA, etc.). Proficiency with scikit-learn, pandas, and numpy. Experience with ML experiment tracking (MLflow, W&B). Understanding of model deployment patterns (REST API, batch inference, streaming inference). Familiarity with containerization (Docker) and cloud ML services (AWS SageMaker, GCP Vertex AI).\n\nBonus: Experience with LLM fine-tuning and RLHF. Knowledge of time-series forecasting models. Published papers or Kaggle competition experience. Contributions to open-source ML libraries.\n\nPersonal qualities: Curiosity and passion for state-of-the-art ML research. Ability to communicate complex ideas clearly to non-technical stakeholders. Ownership mindset.",
+      "url": "https://example.com/jobs/job_003"
+    },
+    {
+      "id": "job_004",
+      "jobTitle": "Frontend React Engineer",
+      "company": "FinTech Startup",
+      "location": "Hà Nội",
+      "salary": "$1500 - $2500",
+      "jobDescription": "We are a fast-growing fintech startup providing personal finance management tools to over 500,000 users in Vietnam. Our web application is built with React and TypeScript and serves users across desktop and mobile browsers.\n\nWe are looking for a Frontend React Engineer who is passionate about building clean, accessible, and performant user interfaces. You will be part of a small, highly collaborative frontend team that ships new features every week.\n\nResponsibilities include: building and maintaining reusable React components, integrating with REST and GraphQL APIs, ensuring cross-browser compatibility and responsiveness, writing unit and E2E tests (Jest, Cypress), collaborating with designers using Figma, and contributing to our design system.\n\nThis role does NOT require backend or Python skills. We are looking for a specialist who is deeply passionate about frontend engineering, browser performance, and user experience.",
+      "jobRequirement": "Required: 3+ years of professional frontend development. Expert-level React and TypeScript skills. Strong CSS/SCSS knowledge including Flexbox and Grid. Experience with state management (Redux, Zustand, or React Query). Familiarity with build tools (Vite, Webpack). Experience writing tests with Jest and React Testing Library.\n\nNice to have: Experience with Next.js or Remix. Knowledge of Web Performance optimization (Core Web Vitals). Familiarity with GraphQL (Apollo Client). Design sense and experience working with Figma.\n\nNote: This is a frontend-only role. Python, data engineering, or ML experience is not required or expected.",
+      "url": "https://example.com/jobs/job_004"
+    },
+    {
+      "id": "job_005",
+      "jobTitle": "DevOps / Platform Engineer",
+      "company": "CloudNative Co",
+      "location": "Remote (Vietnam)",
+      "salary": "$2000 - $3500",
+      "jobDescription": "CloudNative Co provides cloud infrastructure consulting and managed Kubernetes services to enterprise clients. We are hiring a DevOps / Platform Engineer to help us build and operate internal developer platforms.\n\nYou will design and maintain CI/CD pipelines, Kubernetes clusters, and observability stacks. You will also build internal tools that help our development teams ship code faster and more reliably.\n\nKey projects: migrating legacy services to Kubernetes, implementing GitOps workflows with ArgoCD, building a self-service deployment portal, and setting up centralized logging and monitoring with the ELK/Grafana stack.\n\nWe value automation and infrastructure-as-code. You will be expected to write Terraform modules, Helm charts, and custom Kubernetes operators. A scripting background in Python or Bash is important for automation tasks.",
+      "jobRequirement": "Required: 4+ years of DevOps or SRE experience. Strong Kubernetes knowledge (CKA certification is a plus). Experience with Terraform and Helm. Proficiency with Linux system administration. Familiarity with CI/CD tools (GitHub Actions, Jenkins, GitLab CI). Experience with monitoring and observability (Prometheus, Grafana, ELK Stack). Scripting skills in Python or Bash.\n\nNice to have: Experience with ArgoCD or Flux (GitOps). AWS, GCP, or Azure certification. Knowledge of service meshes (Istio, Linkerd). Experience building Kubernetes operators with the Operator SDK.\n\nNo requirement for ML, data science, or frontend skills.",
+      "url": "https://example.com/jobs/job_005"
+    },
+    {
+      "id": "job_006",
+      "jobTitle": "Python Developer (Automation/QA)",
+      "company": "QA Systems Vietnam",
+      "location": "Hồ Chí Minh",
+      "salary": "$1200 - $2000",
+      "jobDescription": "QA Systems Vietnam provides software testing and quality assurance services to clients across Europe and North America. We are looking for a Python Developer who specializes in test automation to join our QA engineering team.\n\nIn this role, you will design and implement automated test frameworks for web, API, and mobile applications. You will work with client engineering teams to understand requirements and write test plans, test cases, and automation scripts.\n\nPrimary stack: Python with pytest, Playwright, and Selenium for UI testing; Requests and httpx for API testing; Appium for mobile. You will also contribute to our internal test infrastructure and CI integration.\n\nThis is NOT a backend development role — it is focused on test automation and QA engineering. We are looking for someone who is passionate about software quality, edge cases, and breaking things in a controlled way.",
+      "jobRequirement": "Required: 2+ years of Python test automation experience. Proficiency with pytest and test fixtures. Experience with Playwright or Selenium for browser automation. Knowledge of API testing (requests, Postman). Familiarity with CI/CD integration for tests. Ability to read and understand application code to write meaningful tests.\n\nNice to have: Experience with performance testing (Locust, k6). Mobile testing with Appium. BDD frameworks (Behave, Robot Framework). ISTQB certification.\n\nThis role does not require experience in data science, ML, or cloud infrastructure.",
+      "url": "https://example.com/jobs/job_006"
+    },
+    {
+      "id": "job_007",
+      "jobTitle": "Backend Engineer (Java/Spring)",
+      "company": "Enterprise Solutions JSC",
+      "location": "Hà Nội",
+      "salary": "$1800 - $2800",
+      "jobDescription": "Enterprise Solutions JSC is a software company building ERP and HR management systems for large Vietnamese enterprises. We are hiring a Backend Engineer with Java and Spring Boot expertise to join our core platform team.\n\nYou will design and implement backend services for our modular ERP platform. Responsibilities include: building REST APIs with Spring Boot, integrating with Oracle and PostgreSQL databases, implementing business logic for payroll, leave management, and performance review modules, and working with our on-premise deployment team.\n\nOur tech stack is Java-heavy (Java 17, Spring Boot 3, Spring Data JPA, Spring Security). We also use Apache POI for Excel report generation, Jasper Reports for PDF generation, and RabbitMQ for async tasks. This is a traditional enterprise software environment, not a startup.",
+      "jobRequirement": "Required: 3+ years of Java backend development. Strong Spring Boot and Spring MVC experience. Proficiency with JPA/Hibernate and relational databases. Understanding of RESTful API design. Experience with Maven or Gradle build systems. Familiarity with enterprise integration patterns.\n\nNice to have: Experience with microservices architecture. Knowledge of Apache Kafka. Oracle database experience. Experience in HR or ERP software domains.\n\nNote: Python experience is NOT required or relevant for this position. This is a pure Java role.",
+      "url": "https://example.com/jobs/job_007"
+    },
+    {
+      "id": "job_008",
+      "jobTitle": "Senior Python Engineer – Search & Ranking",
+      "company": "SearchTech Vietnam",
+      "location": "Hà Nội / Remote",
+      "salary": "$3000 - $5000",
+      "jobDescription": "SearchTech Vietnam is building the search and discovery layer for a major e-commerce platform in Southeast Asia. We are hiring a Senior Python Engineer to work on our search ranking and relevance team.\n\nYou will build and improve the systems that determine how products, jobs, and content are ranked in response to user queries. This involves working with Elasticsearch and OpenSearch clusters, building offline evaluation pipelines, implementing learning-to-rank models, and A/B testing ranking changes.\n\nKey responsibilities: maintaining and optimizing our Elasticsearch indices, building Python services that re-rank results using ML models (LambdaMART, listwise neural rankers), implementing LLM-as-judge evaluation pipelines to measure search quality, designing A/B experiments and analyzing their results, and collaborating with the ML team to deploy new ranking features.\n\nThis role sits at the intersection of backend engineering, information retrieval, and applied ML. You will be expected to have opinions about both system design and ranking algorithms.",
+      "jobRequirement": "Required: 5+ years of Python engineering experience. Deep experience with Elasticsearch or OpenSearch (indexing, query DSL, relevance tuning). Understanding of information retrieval fundamentals (TF-IDF, BM25, nDCG, MAP). Experience building and evaluating ML ranking models. Proficiency with FastAPI or Flask for building internal APIs. Strong SQL and data analysis skills (pandas, numpy).\n\nBonus: Experience with LLM-as-judge evaluation workflows. Knowledge of learning-to-rank algorithms (LambdaMART, XGBoost ranker). Experience with vector search and embedding-based retrieval (FAISS, pgvector). Familiarity with Kafka for real-time click/impression data ingestion.\n\nThis is a senior role. You should be comfortable making architectural decisions and have a track record of improving search quality metrics.",
+      "url": "https://example.com/jobs/job_008"
+    },
+    {
+      "id": "job_009",
+      "jobTitle": "Python Intern / Junior Developer",
+      "company": "StartupHub Vietnam",
+      "location": "Hồ Chí Minh",
+      "salary": "$500 - $800",
+      "jobDescription": "StartupHub Vietnam is a startup incubator and co-working space. We are looking for a Python Intern or Junior Developer to join our small tech team and help maintain internal tools and automation scripts.\n\nThis is an entry-level role. You will work on tasks such as: writing Python scripts to automate repetitive admin tasks (report generation, data export), maintaining a simple Flask web application used for room booking, helping with data cleaning and analysis in Jupyter notebooks, and building small Telegram/Slack bots for internal notifications.\n\nWe will mentor you and help you grow. The environment is informal, fast-paced, and fun. This is a great opportunity for a fresh graduate or bootcamp graduate to get hands-on experience in a real work environment.",
+      "jobRequirement": "Required: Basic Python programming knowledge (can write functions, work with lists/dicts, use libraries). Familiarity with at least one Python web framework (Flask preferred). Ability to read and understand existing code. Eagerness to learn and take on new challenges.\n\nNice to have: Experience with Git. Basic SQL knowledge. Familiarity with REST APIs. Any prior internship or project experience.\n\nNot required: Advanced ML, cloud, or distributed systems experience. This is an internship/junior role and expectations are set accordingly.",
+      "url": "https://example.com/jobs/job_009"
+    },
+    {
+      "id": "job_010",
+      "jobTitle": "Full Stack Python + React Developer",
+      "company": "ProductHouse",
+      "location": "Hà Nội",
+      "salary": "$2000 - $3200",
+      "jobDescription": "ProductHouse is a product studio that builds SaaS products for international clients. We are hiring a Full Stack Developer with Python backend and React frontend skills to join our product delivery team.\n\nYou will work on multiple concurrent SaaS projects (typically 2-3 at a time), taking features from design mockup to production. On the backend, you will use Python with FastAPI or Django REST Framework. On the frontend, you will use React with TypeScript. You will also handle deployments on AWS using Terraform and GitHub Actions.\n\nThis role requires flexibility — you may be the only developer on a feature, so you need to be comfortable working across the full stack without waiting for handoffs. We value pragmatism, good communication with clients, and shipping working software on schedule.\n\nProjects you might work on: a B2B invoicing SaaS, an online education platform, a job board with AI-powered matching, and a CRM for a US-based real estate company.",
+      "jobRequirement": "Required: 3+ years of full stack development experience. Strong Python skills with FastAPI or Django. Solid React and TypeScript experience. PostgreSQL or MySQL proficiency. Experience with AWS (EC2, S3, RDS, Lambda). Git workflow and PR-based development process. Ability to read and write technical documentation in English.\n\nNice to have: Experience with Next.js. Familiarity with Stripe or other payment integrations. Basic DevOps skills (Docker, Nginx). Experience working directly with English-speaking clients.\n\nThis is a generalist role. If you strongly prefer to specialize in either frontend or backend only, this may not be the right fit.",
+      "url": "https://example.com/jobs/job_010"
+    }
+  ]
+}
