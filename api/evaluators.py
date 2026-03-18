@@ -383,9 +383,18 @@ async def _fill_contenteditable(page, locator, text: str, headless: bool) -> Non
                                input=text.encode("utf-8"), check=True)
                 await locator.click()
                 await page.keyboard.press("Control+v")
-            except FileNotFoundError:
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                # xclip unavailable or no $DISPLAY — use execCommand fallback
                 await locator.click()
-                await locator.press_sequentially(text, delay=0)
+                await page.evaluate(
+                    """(text) => {
+                        const el = document.activeElement;
+                        el.focus();
+                        document.execCommand('selectAll', false, null);
+                        document.execCommand('insertText', false, text);
+                    }""",
+                    text,
+                )
     else:
         # Headless: execCommand still works and triggers React/contenteditable state
         await locator.click()
