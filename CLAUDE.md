@@ -114,6 +114,6 @@ Tests use pre-recorded LLM responses (no live API calls by default).
 ## Common Issues
 
 - **"LLM did not return valid JSON"**: The parser in `parser.py` strips markdown fences and finds the JSON array. If still failing, check the raw LLM response in `ResultScore.raw_response`.
-- **chatgpt_web Cloudflare block**: Use real Chrome (`channel="chrome"`), not headless Chromium. The evaluator tries Chrome first automatically.
+- **chatgpt_web WAF block**: Use real Chrome (`channel="chrome"`), not headless Chromium. The evaluator tries Chrome first automatically.
 - **Playwright not found**: Run `uv run playwright install chromium` once.
 - **uv cache / venv location**: `uv.toml` sets `cache-dir = "/tmp/uv-cache-keyless-eval"`. Use `UV_PROJECT_ENVIRONMENT=/tmp/keyless-eval-venv` if `.venv` inside the project is sandbox-restricted.

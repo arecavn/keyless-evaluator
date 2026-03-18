@@ -266,27 +266,50 @@ navigator.permissions.query = (p) =>
 // Doing so breaks ChatGPT's React streaming renderer (assistant text stays empty).
 """
 
-_STEALTH_ARGS = [
-    "--no-sandbox",
-    "--disable-blink-features=AutomationControlled",
-    "--disable-dev-shm-usage",
-    "--disable-infobars",
-    "--disable-extensions",
-    "--window-size=1280,800",
-    "--start-maximized",
-    "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-web-security",
-    "--lang=en-US,en",
-    # Docker / Linux: disable GPU hardware acceleration (no GPU available in containers).
-    # Without this, the GPU process crashes and can take down the whole browser.
-    "--disable-gpu",
-    "--disable-software-rasterizer",
-    "--use-gl=swiftshader",
-    # Prevent Chrome from crashing when it can't decrypt macOS Keychain tokens
-    # (happens when a Mac profile is loaded on Linux inside Docker).
-    "--disable-sync",
-    "--disable-background-networking",
-]
+def _get_stealth_args(headless: bool) -> list[str]:
+    """
+    Return Chromium launch args tuned for the current environment.
+
+    Visible Mac Chrome: minimal clean args — WAF is suspicious of
+    --disable-web-security, --use-gl=swiftshader, and GPU-disable flags on a
+    machine that has a real GPU and display.
+
+    Headless / Linux (Docker): full set of flags to avoid GPU crashes and
+    Keychain decrypt failures.
+    """
+    import platform as _platform
+    is_mac_visible = _platform.system() == "Darwin" and not headless
+
+    args = [
+        "--no-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--disable-infobars",
+        "--disable-extensions",
+        "--window-size=1280,800",
+        "--lang=en-US,en",
+    ]
+
+    if not is_mac_visible:
+        # These flags help bypass detection headlessly but look suspicious to
+        # WAF when used with a real visible Chrome on Mac.
+        args += [
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--disable-web-security",
+        ]
+
+    if headless:
+        # GPU flags only needed when no display / GPU is available (Docker/Linux)
+        args += [
+            "--disable-gpu",
+            "--disable-software-rasterizer",
+            "--use-gl=swiftshader",
+            # Prevent crash when a Mac-encrypted Chrome profile is loaded on Linux
+            "--disable-sync",
+            "--disable-background-networking",
+        ]
+
+    return args
 
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -410,12 +433,38 @@ class ChatGPTWebEvaluator(BaseEvaluator):
 
     async def _launch_browser(self, pw):
         os.makedirs(self._profile_dir, exist_ok=True)
+        args = _get_stealth_args(self._headless)
 
+        # Try real system Chrome installations in order (most trusted by WAF).
+        # Avoid "Google Chrome for Testing" (Playwright's channel="chrome" on ARM Mac)
+        # which WAF detects as a bot.
+        _chrome_paths = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+        ]
+        for _exe in _chrome_paths:
+            if os.path.isfile(_exe):
+                try:
+                    _ensure_llm_logger()
+                    _llm_logger.info("chatgpt_web: launching real Chrome at %s", _exe)
+                    return await pw.chromium.launch_persistent_context(
+                        self._profile_dir,
+                        executable_path=_exe,
+                        headless=self._headless,
+                        args=args,
+                        user_agent=_USER_AGENT,
+                    )
+                except Exception as _e:
+                    _llm_logger.warning("chatgpt_web: failed to launch %s: %s", _exe, _e)
+
+        # Fallback: channel="chrome" (may be Chrome for Testing on ARM Mac)
         try:
             return await pw.chromium.launch_persistent_context(
                 self._profile_dir, channel="chrome",
                 headless=self._headless,
-                args=_STEALTH_ARGS,
+                args=args,
                 user_agent=_USER_AGENT,
             )
         except Exception:
@@ -424,7 +473,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
         return await pw.chromium.launch_persistent_context(
             self._profile_dir,
             headless=self._headless,
-            args=_STEALTH_ARGS,
+            args=args,
             user_agent=_USER_AGENT,
         )
 
@@ -441,6 +490,8 @@ class ChatGPTWebEvaluator(BaseEvaluator):
         system = self._system_prompt(request)
         full_prompt = _build_prompt_header(request) + f"{system}\n\n---\n\n{build_user_prompt(request)}"
 
+        cdp_url = os.environ.get("CHATGPT_CDP_URL", "").strip()
+
         detected_model: str | None = None
         raw_text = ""
 
@@ -451,32 +502,50 @@ class ChatGPTWebEvaluator(BaseEvaluator):
         is_project_url = "/g/g-p-" in chatgpt_url
 
         async with async_playwright() as pw:
-            context = await self._launch_browser(pw)
-            await context.add_init_script(_STEALTH_SCRIPT)
+            _cdp_mode = bool(cdp_url)
+            if _cdp_mode:
+                # Connect to an already-running Chrome with --remote-debugging-port
+                _ensure_llm_logger()
+                _llm_logger.info("chatgpt_web: connecting via CDP to %s", cdp_url)
+                browser = await pw.chromium.connect_over_cdp(cdp_url)
+                context = browser.contexts[0] if browser.contexts else await browser.new_context()
+                await context.add_init_script(_STEALTH_SCRIPT)
+                pages = context.pages
+                page = pages[0] if pages else await context.new_page()
+            else:
+                context = await self._launch_browser(pw)
+                await context.add_init_script(_STEALTH_SCRIPT)
+                pages = context.pages
+                page = pages[0] if pages else await context.new_page()
 
-            pages = context.pages
-            page = pages[0] if pages else await context.new_page()
             page.set_default_timeout(300_000)
             await page.set_viewport_size({"width": 1280, "height": 800})
 
             try:
-                # Step 1: always land on chatgpt.com first — this establishes the session
-                # and passes Cloudflare reliably before any project navigation
+                # Step 1: navigate to chatgpt.com and wait for the actual ChatGPT UI to load.
+                # If WAF shows a challenge, the user can interact with it manually —
+                # we just wait up to 90 s for the real textarea to appear before giving up.
                 _ensure_llm_logger()
                 await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(2000)
-
+                _llm_logger.info("chatgpt_web: waiting for ChatGPT UI (up to 90s, solve any WAF challenge manually)...")
                 try:
-                    _title = await page.title()
-                    if "just a moment" in _title.lower() or "cloudflare" in _title.lower():
-                        raise RuntimeError(
-                            "Cloudflare bot-detection triggered on chatgpt.com. "
-                            "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
-                        )
-                except RuntimeError:
-                    raise
+                    await page.wait_for_selector(
+                        "#prompt-textarea, div[contenteditable='true'][data-virtualkeyboard-exclusion], div[contenteditable='true']",
+                        timeout=300_000,
+                    )
                 except Exception:
-                    pass
+                    _title = ""
+                    try:
+                        _title = await page.title()
+                    except Exception:
+                        pass
+                    raise RuntimeError(
+                        "ChatGPT did not load within 5 min. "
+                        + (f"Page title: {_title!r}. " if _title else "")
+                        + "If a WAF challenge appeared, try solving it manually. "
+                        "You may also need to re-login: set CHATGPT_WEB_LOGIN=1 once."
+                    )
+                _llm_logger.info("chatgpt_web: ChatGPT UI ready at %s", page.url)
 
                 for dismiss_text in ["Stay logged out", "Start now", "OK"]:
                     try:
@@ -487,7 +556,7 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                         pass
 
                 # Step 2: if a project URL is configured, navigate there as a second hop
-                # (within an already-established session, so Cloudflare won't challenge)
+                # (within an already-established session, so WAF won't challenge)
                 if is_project_url:
                     _llm_logger.info("chatgpt_web: second-hop to project URL=%s", chatgpt_url)
                     await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
@@ -546,17 +615,6 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                     await page.wait_for_timeout(200)
 
                 await page.wait_for_timeout(1500)
-                try:
-                    title = await page.title()
-                    if "just a moment" in title.lower() or "cloudflare" in title.lower():
-                        raise RuntimeError(
-                            "Cloudflare bot-detection triggered. "
-                            "Set CHATGPT_WEB_HEADLESS=0 to use visible browser mode."
-                        )
-                except RuntimeError:
-                    raise
-                except Exception:
-                    pass
 
                 await page.wait_for_function(
                     """() => {
@@ -594,7 +652,8 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                         pass
 
             finally:
-                await context.close()
+                if not _cdp_mode:
+                    await context.close()
 
         if not raw_text:
             raise RuntimeError("ChatGPT returned an empty response.")
@@ -709,12 +768,7 @@ class GeminiWebEvaluator(BaseEvaluator):
 
     async def _launch_browser(self, pw):
         os.makedirs(self._profile_dir, exist_ok=True)
-        args = _STEALTH_ARGS if self._headless else [
-            "--no-sandbox",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-dev-shm-usage",
-            "--window-size=1280,800",
-        ]
+        args = _get_stealth_args(self._headless)
         try:
             return await pw.chromium.launch_persistent_context(
                 self._profile_dir, channel="chrome",
