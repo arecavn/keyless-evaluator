@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import IntEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class FieldMapping(BaseModel):
@@ -185,8 +185,9 @@ class EvaluationRequestBody(BaseModel):
     }
     ```
     """
-    input: str = Field(description="The search query or evaluation criterion")
+    input: str = Field(default="", description="The search query or evaluation criterion")
     output: Any = Field(
+        default=None,
         description=(
             "What to evaluate. "
             "A plain string (single document) OR a raw JSON object/array from a search API."
@@ -245,3 +246,14 @@ class EvaluationRequestBody(BaseModel):
             "making different eval types easy to distinguish in chat history."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_fields(cls, data: Any) -> Any:
+        """Accept `query`/`results` as aliases for `input`/`output`."""
+        if isinstance(data, dict):
+            if not data.get("input") and data.get("query"):
+                data["input"] = data["query"]
+            if data.get("output") is None and data.get("results") is not None:
+                data["output"] = data["results"]
+        return data
