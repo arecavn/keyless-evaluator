@@ -21,7 +21,7 @@ Backends (auto-selected at startup):
   default        → File cache in CACHE_DIR (default: ./cache/)
 
 Env vars:
-  CACHE_TTL   seconds before a cached result expires (default: 86400 = 24 h)
+  CACHE_TTL   seconds before a cached result expires (default: 157680000 = 5 years)
               set to 0 to disable caching entirely
   CACHE_DIR   directory for file-based cache (default: ./cache/)
   REDIS_URL   Redis connection URL (e.g. redis://localhost:6379/0)
@@ -40,7 +40,7 @@ from models import EvaluationRequest, EvaluationResponse
 
 _log = logging.getLogger("keyless_evaluator.cache")
 
-_CACHE_TTL = int(os.environ.get("CACHE_TTL", "86400"))
+_CACHE_TTL = int(os.environ.get("CACHE_TTL", "157680000"))  # default: 5 years
 _CACHE_DIR = os.environ.get("CACHE_DIR", os.path.join(os.getcwd(), "cache"))
 
 
