@@ -16,6 +16,12 @@ Score each result on a 0–3 scale:
 |   1   | Marginal        | The result is only tangentially related to the query.         |
 |   0   | Irrelevant      | The result has no meaningful connection to the query.         |
 
+## Query Intent
+Interpret the query intent before scoring:
+- **Company-name queries** ("jobs at MUJI", "MUJI tuyển dụng"): any job from that company scores 3 — role type does not matter.
+- **Role-only queries** ("python developer", "store supervisor"): score by role match, company is irrelevant.
+- **Role + company queries** ("python developer at Google"): both role and company must match for a high score.
+
 ## Output Format
 You MUST return a JSON array — one object per result — in this exact schema:
 ```json
