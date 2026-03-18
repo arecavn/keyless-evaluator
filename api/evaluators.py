@@ -155,7 +155,6 @@ class OpenAIEvaluator(BaseEvaluator):
                 {"role": "user", "content": build_user_prompt(request)},
             ],
             temperature=0.1,
-            response_format={"type": "json_object"} if "gpt-4" in self.model else {"type": "text"},
         )
 
         raw = response.choices[0].message.content or ""

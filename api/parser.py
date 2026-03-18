@@ -61,8 +61,12 @@ def parse_evaluation_response(
                 f"--- Parse error ---\n{exc}"
             ) from exc
 
-    # Build a lookup by result_id (string-coerced for safety)
-    parsed: dict[str, dict] = {str(item.get("result_id", "")): item for item in items}
+    # Build a lookup by result_id — skip any non-dict items (e.g. json_repair artifacts)
+    parsed: dict[str, dict] = {
+        str(item.get("result_id", "")): item
+        for item in items
+        if isinstance(item, dict)
+    }
 
     scored: list[ResultScore] = []
     for result in results:
