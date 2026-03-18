@@ -342,9 +342,10 @@ _MODEL_DETECTION_JS = """
 # (one page at a time). Concurrent requests would clobber each other's navigation.
 _CHATGPT_LOCK = asyncio.Lock()
 
-# CDP mode: reuse the same tab between requests to skip chatgpt.com navigation overhead.
-# Reset to None if the page is closed or navigation fails.
-_cdp_persistent_page = None
+# CDP mode: persistent Playwright + page kept alive across requests.
+# async with async_playwright() closes everything on exit, so we use .start() instead.
+_cdp_pw = None          # Playwright instance (never closed)
+_cdp_persistent_page = None  # reused tab between requests
 
 _DEFAULT_PROFILE_DIR = os.path.expanduser("~/.local/share/keyless-eval/chatgpt")
 _SESSION_MARKER = "keyless-eval-session"
@@ -494,6 +495,116 @@ class ChatGPTWebEvaluator(BaseEvaluator):
             user_agent=_USER_AGENT,
         )
 
+    async def _navigate_and_interact(self, page, chatgpt_url, is_project_url, reuse_page, full_prompt):
+        """Navigate to ChatGPT and fill the prompt. Shared by CDP and launch modes."""
+        _TEXTAREA_SEL = "#prompt-textarea, div[contenteditable='true'][data-virtualkeyboard-exclusion], div[contenteditable='true']"
+
+        if reuse_page and is_project_url:
+            _llm_logger.info("chatgpt_web: reused tab → navigating to project URL=%s", chatgpt_url)
+            await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_selector(_TEXTAREA_SEL, timeout=30_000)
+            _llm_logger.info("chatgpt_web: ready at %s", page.url)
+        elif reuse_page:
+            _llm_logger.info("chatgpt_web: reused tab, already at home")
+        else:
+            await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=30000)
+            _llm_logger.info("chatgpt_web: waiting for ChatGPT UI (up to 5 min, solve any WAF challenge manually)...")
+            try:
+                await page.wait_for_selector(_TEXTAREA_SEL, timeout=300_000)
+            except Exception:
+                _title = ""
+                try:
+                    _title = await page.title()
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    "ChatGPT did not load within 5 min. "
+                    + (f"Page title: {_title!r}. " if _title else "")
+                    + "If a WAF challenge appeared, try solving it manually."
+                )
+            _llm_logger.info("chatgpt_web: ChatGPT UI ready at %s", page.url)
+
+            for dismiss_text in ["Stay logged out", "Start now", "OK"]:
+                try:
+                    btn = page.get_by_text(dismiss_text, exact=True).first
+                    if await btn.is_visible(timeout=2000):
+                        await btn.click()
+                except Exception:
+                    pass
+
+            if is_project_url:
+                _llm_logger.info("chatgpt_web: navigating to project URL=%s", chatgpt_url)
+                await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
+                await page.wait_for_timeout(1000)
+                _llm_logger.info("chatgpt_web: arrived at %s title=%r", page.url, await page.title())
+
+        textarea = page.locator("#prompt-textarea").first
+        try:
+            await textarea.wait_for(state="visible", timeout=20000)
+        except Exception:
+            for sel in [
+                "div[contenteditable='true'][data-virtualkeyboard-exclusion]",
+                "div[contenteditable='true']",
+                "textarea[placeholder]",
+            ]:
+                try:
+                    textarea = page.locator(sel).first
+                    await textarea.wait_for(state="visible", timeout=5000)
+                    _llm_logger.info("chatgpt_web: found textarea via fallback %r", sel)
+                    break
+                except Exception:
+                    pass
+            else:
+                _llm_logger.error("chatgpt_web: textarea not found. title=%s url=%s", await page.title(), page.url)
+                raise RuntimeError("ChatGPT input field not found. Check logs/llm.log for details.")
+
+        await _fill_contenteditable(page, textarea, full_prompt, self._headless)
+        await page.wait_for_timeout(500)
+
+        sent = False
+        try:
+            send_btn = page.locator("[data-testid='send-button']").first
+            await send_btn.wait_for(state="visible", timeout=5000)
+            await send_btn.click()
+            sent = True
+        except Exception:
+            pass
+        if not sent:
+            await textarea.press("Enter")
+            await page.wait_for_timeout(200)
+
+    async def _read_response(self, page) -> tuple[str | None, str]:
+        """Wait for ChatGPT to finish streaming and return (detected_model, raw_text)."""
+        await page.wait_for_timeout(1500)
+        await page.wait_for_function(
+            """() => {
+                const msgs = document.querySelectorAll('[data-message-author-role="assistant"]');
+                if (!msgs.length) return false;
+                return (msgs[msgs.length - 1].innerText || '').trim().length > 10;
+            }""",
+            timeout=self._timeout * 1000,
+        )
+        try:
+            await page.locator("[data-testid='stop-button']").wait_for(
+                state="hidden", timeout=self._timeout * 1000
+            )
+        except Exception:
+            pass
+        await page.wait_for_timeout(800)
+
+        raw_text = await page.evaluate(
+            """() => {
+                const msgs = document.querySelectorAll('[data-message-author-role="assistant"]');
+                return msgs.length ? (msgs[msgs.length - 1].innerText || '') : '';
+            }"""
+        )
+        detected_model = None
+        try:
+            detected_model = await page.evaluate(_MODEL_DETECTION_JS)
+        except Exception:
+            pass
+        return detected_model, raw_text
+
     async def evaluate(self, request: EvaluationRequest) -> EvaluationResponse:
         try:
             from playwright.async_api import async_playwright
@@ -519,184 +630,64 @@ class ChatGPTWebEvaluator(BaseEvaluator):
         is_project_url = "/g/g-p-" in chatgpt_url
 
         async with _CHATGPT_LOCK:
-            async with async_playwright() as pw:
-                global _cdp_persistent_page
-                _cdp_mode = bool(cdp_url)
-                if _cdp_mode:
-                    _ensure_llm_logger()
-                    browser = await pw.chromium.connect_over_cdp(cdp_url)
-                    context = browser.contexts[0] if browser.contexts else await browser.new_context()
-                    await context.add_init_script(_STEALTH_SCRIPT)
+            global _cdp_pw, _cdp_persistent_page
+            _cdp_mode = bool(cdp_url)
+            _ensure_llm_logger()
 
-                    # Reuse persistent tab if still alive and on chatgpt.com — skip navigation
-                    _reuse_page = False
-                    if _cdp_persistent_page is not None:
-                        try:
-                            if not _cdp_persistent_page.is_closed() and "chatgpt.com" in _cdp_persistent_page.url:
-                                page = _cdp_persistent_page
-                                _reuse_page = True
-                                _llm_logger.info("chatgpt_web: reusing persistent tab at %s", page.url)
-                        except Exception:
-                            _cdp_persistent_page = None
+            if _cdp_mode:
+                # Use a persistent Playwright instance — async with closes pages on exit.
+                from playwright.async_api import async_playwright as _apw
+                if _cdp_pw is None:
+                    _cdp_pw = await _apw().start()
 
-                    if not _reuse_page:
-                        _llm_logger.info("chatgpt_web: connecting via CDP to %s", cdp_url)
-                        page = await context.new_page()
-                        _cdp_persistent_page = page
-                else:
-                    context = await self._launch_browser(pw)
-                    await context.add_init_script(_STEALTH_SCRIPT)
-                    pages = context.pages
-                    page = pages[0] if pages else await context.new_page()
-                    _reuse_page = False
+                browser = await _cdp_pw.chromium.connect_over_cdp(cdp_url)
+                context = browser.contexts[0] if browser.contexts else await browser.new_context()
+                await context.add_init_script(_STEALTH_SCRIPT)
+
+                # Reuse persistent tab if still alive and on chatgpt.com
+                _reuse_page = False
+                if _cdp_persistent_page is not None:
+                    try:
+                        if not _cdp_persistent_page.is_closed() and "chatgpt.com" in _cdp_persistent_page.url:
+                            page = _cdp_persistent_page
+                            _reuse_page = True
+                            _llm_logger.info("chatgpt_web: reusing persistent tab at %s", page.url)
+                    except Exception:
+                        _cdp_persistent_page = None
+
+                if not _reuse_page:
+                    _llm_logger.info("chatgpt_web: opening new tab via CDP to %s", cdp_url)
+                    page = await context.new_page()
+                    _cdp_persistent_page = page
 
                 page.set_default_timeout(300_000)
                 await page.set_viewport_size({"width": 1280, "height": 800})
 
                 try:
-                    _ensure_llm_logger()
-                    if _reuse_page and is_project_url:
-                        # Tab already on chatgpt.com — go straight to project root (new chat)
-                        _llm_logger.info("chatgpt_web: reused tab → navigating to project URL=%s", chatgpt_url)
-                        await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
-                        await page.wait_for_selector(
-                            "#prompt-textarea, div[contenteditable='true'][data-virtualkeyboard-exclusion], div[contenteditable='true']",
-                            timeout=30_000,
-                        )
-                        _llm_logger.info("chatgpt_web: ready at %s", page.url)
-                    elif _reuse_page:
-                        # Already on chatgpt.com home — nothing to navigate
-                        _llm_logger.info("chatgpt_web: reused tab, already at home")
-                    else:
-                        # Fresh tab — full navigation: chatgpt.com → project URL
-                        await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=30000)
-                        _llm_logger.info("chatgpt_web: waiting for ChatGPT UI (up to 5 min, solve any WAF challenge manually)...")
-                        try:
-                            await page.wait_for_selector(
-                                "#prompt-textarea, div[contenteditable='true'][data-virtualkeyboard-exclusion], div[contenteditable='true']",
-                                timeout=300_000,
-                            )
-                        except Exception:
-                            _cdp_persistent_page = None
-                            _title = ""
-                            try:
-                                _title = await page.title()
-                            except Exception:
-                                pass
-                            raise RuntimeError(
-                                "ChatGPT did not load within 5 min. "
-                                + (f"Page title: {_title!r}. " if _title else "")
-                                + "If a WAF challenge appeared, try solving it manually. "
-                                "You may also need to re-login: set CHATGPT_WEB_LOGIN=1 once."
-                            )
-                        _llm_logger.info("chatgpt_web: ChatGPT UI ready at %s", page.url)
-
-                        for dismiss_text in ["Stay logged out", "Start now", "OK"]:
-                            try:
-                                btn = page.get_by_text(dismiss_text, exact=True).first
-                                if await btn.is_visible(timeout=2000):
-                                    await btn.click()
-                            except Exception:
-                                pass
-
-                        if is_project_url:
-                            _llm_logger.info("chatgpt_web: navigating to project URL=%s", chatgpt_url)
-                            await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
-                            await page.wait_for_timeout(1000)
-                            _llm_logger.info("chatgpt_web: arrived at URL=%s title=%r", page.url, await page.title())
-    
-                    # Try to detect the active model before sending (UI is stable at this point)
-                    try:
-                        detected_model = await page.evaluate(_MODEL_DETECTION_JS)
-                    except Exception:
-                        pass
-    
-                    _llm_logger.info("chatgpt_web: looking for textarea, URL=%s", page.url)
-                    textarea = page.locator("#prompt-textarea").first
-                    try:
-                        await textarea.wait_for(state="visible", timeout=20000)
-                    except Exception:
-                        # Fallback selectors for project or alternate layouts
-                        for sel in [
-                            "div[contenteditable='true'][data-virtualkeyboard-exclusion]",
-                            "div[contenteditable='true']",
-                            "textarea[placeholder]",
-                        ]:
-                            try:
-                                textarea = page.locator(sel).first
-                                await textarea.wait_for(state="visible", timeout=5000)
-                                _llm_logger.info("chatgpt_web: found textarea via fallback selector %r", sel)
-                                break
-                            except Exception:
-                                pass
-                        else:
-                            _llm_logger.error("chatgpt_web: textarea not found. Page title=%s URL=%s", await page.title(), page.url)
-                            raise RuntimeError(
-                                "ChatGPT input field not found. "
-                                "The project page may require login or 'New chat' navigation failed. "
-                                "Check logs/llm.log for details."
-                            )
-                    await _fill_contenteditable(page, textarea, full_prompt, self._headless)
-                    await page.wait_for_timeout(500)
-    
-                    # Wait briefly for React to process the typed text before sending
-                    await page.wait_for_timeout(500)
-    
-                    sent = False
-                    try:
-                        send_btn = page.locator("[data-testid='send-button']").first
-                        await send_btn.wait_for(state="visible", timeout=5000)
-                        await send_btn.click()
-                        sent = True
-                    except Exception:
-                        pass
-    
-                    if not sent:
-                        # Try keyboard Enter (works when textarea is focused)
-                        await textarea.press("Enter")
-                        await page.wait_for_timeout(200)
-    
-                    await page.wait_for_timeout(1500)
-    
-                    await page.wait_for_function(
-                        """() => {
-                            const msgs = document.querySelectorAll('[data-message-author-role="assistant"]');
-                            if (!msgs.length) return false;
-                            const last = msgs[msgs.length - 1];
-                            const text = last.innerText ? last.innerText.trim() : '';
-                            return text.length > 10;
-                        }""",
-                        timeout=self._timeout * 1000,
+                    await self._navigate_and_interact(
+                        page, chatgpt_url, is_project_url, _reuse_page, full_prompt
                     )
-    
+                    detected_model, raw_text = await self._read_response(page)
+                except Exception:
+                    _cdp_persistent_page = None   # reset on error so next request gets fresh tab
+                    raise
+                # Keep tab open for reuse
+
+            else:
+                async with async_playwright() as pw:
+                    context = await self._launch_browser(pw)
+                    await context.add_init_script(_STEALTH_SCRIPT)
+                    pages = context.pages
+                    page = pages[0] if pages else await context.new_page()
+                    page.set_default_timeout(300_000)
+                    await page.set_viewport_size({"width": 1280, "height": 800})
                     try:
-                        await page.locator("[data-testid='stop-button']").wait_for(
-                            state="hidden", timeout=self._timeout * 1000
+                        await self._navigate_and_interact(
+                            page, chatgpt_url, is_project_url, False, full_prompt
                         )
-                    except Exception:
-                        pass
-    
-                    await page.wait_for_timeout(800)
-    
-                    raw_text = await page.evaluate(
-                        """() => {
-                            const msgs = document.querySelectorAll('[data-message-author-role="assistant"]');
-                            if (!msgs.length) return '';
-                            return msgs[msgs.length - 1].innerText || '';
-                        }"""
-                    )
-    
-                    # Re-try model detection after response (model switcher may have updated)
-                    if not detected_model:
-                        try:
-                            detected_model = await page.evaluate(_MODEL_DETECTION_JS)
-                        except Exception:
-                            pass
-    
-                finally:
-                    if not _cdp_mode:
+                        detected_model, raw_text = await self._read_response(page)
+                    finally:
                         await context.close()
-                    # CDP mode: keep the tab open for reuse on next request
 
         if not raw_text:
             raise RuntimeError("ChatGPT returned an empty response.")
