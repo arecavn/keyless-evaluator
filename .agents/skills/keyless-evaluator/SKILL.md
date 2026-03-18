@@ -105,6 +105,72 @@ Auto-detected snippet candidates: `snippet`, `jobDescription`, `description`, `s
 3. Use `self._build_response(request, scores)` to wrap results
 4. Add to `PROVIDER_MAP` and `_DEFAULT_MODELS`
 
+## Ubuntu Server Setup (with Desktop + Chrome)
+
+```bash
+# 1. Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.bashrc
+
+# 2. Get the code (first time)
+git clone https://github.com/arecavn/keyless-evaluator.git
+cd keyless-evaluator
+
+# OR if downloaded as zip:
+cd ~/Downloads/keyless-evaluator-main
+git init && git remote add origin https://github.com/arecavn/keyless-evaluator.git
+
+# 3. Install deps + Playwright browsers
+uv sync
+uv run playwright install --with-deps chromium
+
+# 4. Install real Chrome
+wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y /tmp/chrome.deb
+
+# 5. Copy .env
+cp .env.example .env   # then edit with your keys
+```
+
+### Pull updates (after first setup)
+
+```bash
+git fetch origin && git reset --hard origin/main && uv sync && sh support/restart.sh
+```
+
+### CDP setup (required for chatgpt_web)
+
+Open Chrome with debug port **on the Ubuntu desktop**:
+```bash
+google-chrome --user-data-dir=/tmp/chatgpt-cdp-profile --remote-debugging-port=9222 --no-first-run --no-default-browser-check
+```
+
+- Log in to ChatGPT in that window
+- Navigate to your GPT project URL and solve any WAF challenge once
+- Keep Chrome open
+
+Add to `.env`:
+```env
+CHATGPT_CDP_URL=http://127.0.0.1:9222
+CHATGPT_WEB_HEADLESS=0
+```
+
+Verify Chrome is listening:
+```bash
+curl http://127.0.0.1:9222/json/version
+```
+
+Start server:
+```bash
+sh support/restart.sh
+# or: uv run python main.py
+```
+
+**Notes**:
+- Default host is `0.0.0.0:8510` — accessible from network
+- Chrome must stay open while server runs
+- `xclip` not needed — server uses `execCommand` fallback when `$DISPLAY` is unavailable
+- To update: always `git fetch origin && git reset --hard origin/main` (not just `git pull`)
+
 ## Docker Deployment
 
 ```bash
