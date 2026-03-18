@@ -14,7 +14,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from adapter import adapt_raw_input
-from evaluators import PROVIDER_MAP, _compute_ndcg, get_evaluator
+from cache import cache_get, cache_set
+from evaluators import PROVIDER_MAP, _DEFAULT_MODELS, _compute_ndcg, get_evaluator
 from models import EvaluationRequest, EvaluationRequestBody, EvaluationResponse, SearchResult
 
 
@@ -140,9 +141,24 @@ def create_app() -> FastAPI:
 
         try:
             evaluator = get_evaluator(provider=provider, model=model)
+            resolved_model = model or _DEFAULT_MODELS.get(provider, "")
+
+            # ── Cache lookup ──────────────────────────────────────────────
+            cached = cache_get(eval_request, provider, resolved_model)
+            if cached is not None:
+                resp, cache_key = cached
+                _ensure_server_logger()
+                _server_logger.info("cache HIT key=%s", cache_key)
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    content=resp.model_dump(),
+                    headers={"X-Cache": "HIT", "X-Cache-Key": cache_key},
+                )
 
             if body.batch_size is None or body.batch_size >= len(results):
-                return await evaluator.evaluate(eval_request)
+                resp = await evaluator.evaluate(eval_request)
+                cache_set(eval_request, provider, resolved_model, resp)
+                return resp
 
             # Batched evaluation: split results into chunks, merge scores
             chunks = [
@@ -184,6 +200,7 @@ def create_app() -> FastAPI:
                 completion_tokens=total_completion_tokens or None,
             )
             merged.ndcg = _compute_ndcg(all_scores)
+            cache_set(eval_request, provider, resolved_model, merged)
             return merged
 
         except ValueError as e:

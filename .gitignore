@@ -25,3 +25,4 @@ gemini_profile/
 *_private*.json
 *_company*.json
 *_test_data.json
+cache/

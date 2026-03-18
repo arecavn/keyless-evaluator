@@ -20,3 +20,4 @@ gemini_profile/
 *.session/
 *_private*.json
 *_company*.json
+cache/
