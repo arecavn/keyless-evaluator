@@ -342,6 +342,10 @@ _MODEL_DETECTION_JS = """
 # (one page at a time). Concurrent requests would clobber each other's navigation.
 _CHATGPT_LOCK = asyncio.Lock()
 
+# CDP mode: reuse the same tab between requests to skip chatgpt.com navigation overhead.
+# Reset to None if the page is closed or navigation fails.
+_cdp_persistent_page = None
+
 _DEFAULT_PROFILE_DIR = os.path.expanduser("~/.local/share/keyless-eval/chatgpt")
 _SESSION_MARKER = "keyless-eval-session"
 _DEFAULT_CHATGPT_URL = "https://chatgpt.com/"
@@ -516,66 +520,90 @@ class ChatGPTWebEvaluator(BaseEvaluator):
 
         async with _CHATGPT_LOCK:
             async with async_playwright() as pw:
+                global _cdp_persistent_page
                 _cdp_mode = bool(cdp_url)
                 if _cdp_mode:
-                    # Connect to an already-running Chrome with --remote-debugging-port.
-                    # Always open a NEW page so concurrent requests don't share the same tab.
                     _ensure_llm_logger()
-                    _llm_logger.info("chatgpt_web: connecting via CDP to %s", cdp_url)
                     browser = await pw.chromium.connect_over_cdp(cdp_url)
                     context = browser.contexts[0] if browser.contexts else await browser.new_context()
                     await context.add_init_script(_STEALTH_SCRIPT)
-                    page = await context.new_page()
+
+                    # Reuse persistent tab if still alive and on chatgpt.com — skip navigation
+                    _reuse_page = False
+                    if _cdp_persistent_page is not None:
+                        try:
+                            if not _cdp_persistent_page.is_closed() and "chatgpt.com" in _cdp_persistent_page.url:
+                                page = _cdp_persistent_page
+                                _reuse_page = True
+                                _llm_logger.info("chatgpt_web: reusing persistent tab at %s", page.url)
+                        except Exception:
+                            _cdp_persistent_page = None
+
+                    if not _reuse_page:
+                        _llm_logger.info("chatgpt_web: connecting via CDP to %s", cdp_url)
+                        page = await context.new_page()
+                        _cdp_persistent_page = page
                 else:
                     context = await self._launch_browser(pw)
                     await context.add_init_script(_STEALTH_SCRIPT)
                     pages = context.pages
                     page = pages[0] if pages else await context.new_page()
-    
+                    _reuse_page = False
+
                 page.set_default_timeout(300_000)
                 await page.set_viewport_size({"width": 1280, "height": 800})
-    
+
                 try:
-                    # Step 1: navigate to chatgpt.com and wait for the actual ChatGPT UI to load.
-                    # If WAF shows a challenge, the user can interact with it manually —
-                    # we just wait up to 90 s for the real textarea to appear before giving up.
                     _ensure_llm_logger()
-                    await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=30000)
-                    _llm_logger.info("chatgpt_web: waiting for ChatGPT UI (up to 90s, solve any WAF challenge manually)...")
-                    try:
+                    if _reuse_page and is_project_url:
+                        # Tab already on chatgpt.com — go straight to project root (new chat)
+                        _llm_logger.info("chatgpt_web: reused tab → navigating to project URL=%s", chatgpt_url)
+                        await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
                         await page.wait_for_selector(
                             "#prompt-textarea, div[contenteditable='true'][data-virtualkeyboard-exclusion], div[contenteditable='true']",
-                            timeout=300_000,
+                            timeout=30_000,
                         )
-                    except Exception:
-                        _title = ""
+                        _llm_logger.info("chatgpt_web: ready at %s", page.url)
+                    elif _reuse_page:
+                        # Already on chatgpt.com home — nothing to navigate
+                        _llm_logger.info("chatgpt_web: reused tab, already at home")
+                    else:
+                        # Fresh tab — full navigation: chatgpt.com → project URL
+                        await page.goto("https://chatgpt.com/", wait_until="domcontentloaded", timeout=30000)
+                        _llm_logger.info("chatgpt_web: waiting for ChatGPT UI (up to 5 min, solve any WAF challenge manually)...")
                         try:
-                            _title = await page.title()
+                            await page.wait_for_selector(
+                                "#prompt-textarea, div[contenteditable='true'][data-virtualkeyboard-exclusion], div[contenteditable='true']",
+                                timeout=300_000,
+                            )
                         except Exception:
-                            pass
-                        raise RuntimeError(
-                            "ChatGPT did not load within 5 min. "
-                            + (f"Page title: {_title!r}. " if _title else "")
-                            + "If a WAF challenge appeared, try solving it manually. "
-                            "You may also need to re-login: set CHATGPT_WEB_LOGIN=1 once."
-                        )
-                    _llm_logger.info("chatgpt_web: ChatGPT UI ready at %s", page.url)
-    
-                    for dismiss_text in ["Stay logged out", "Start now", "OK"]:
-                        try:
-                            btn = page.get_by_text(dismiss_text, exact=True).first
-                            if await btn.is_visible(timeout=2000):
-                                await btn.click()
-                        except Exception:
-                            pass
-    
-                    # Step 2: if a project URL is configured, navigate there as a second hop
-                    # (within an already-established session, so WAF won't challenge)
-                    if is_project_url:
-                        _llm_logger.info("chatgpt_web: second-hop to project URL=%s", chatgpt_url)
-                        await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
-                        await page.wait_for_timeout(2000)
-                        _llm_logger.info("chatgpt_web: arrived at URL=%s title=%r", page.url, await page.title())
+                            _cdp_persistent_page = None
+                            _title = ""
+                            try:
+                                _title = await page.title()
+                            except Exception:
+                                pass
+                            raise RuntimeError(
+                                "ChatGPT did not load within 5 min. "
+                                + (f"Page title: {_title!r}. " if _title else "")
+                                + "If a WAF challenge appeared, try solving it manually. "
+                                "You may also need to re-login: set CHATGPT_WEB_LOGIN=1 once."
+                            )
+                        _llm_logger.info("chatgpt_web: ChatGPT UI ready at %s", page.url)
+
+                        for dismiss_text in ["Stay logged out", "Start now", "OK"]:
+                            try:
+                                btn = page.get_by_text(dismiss_text, exact=True).first
+                                if await btn.is_visible(timeout=2000):
+                                    await btn.click()
+                            except Exception:
+                                pass
+
+                        if is_project_url:
+                            _llm_logger.info("chatgpt_web: navigating to project URL=%s", chatgpt_url)
+                            await page.goto(chatgpt_url, wait_until="domcontentloaded", timeout=20000)
+                            await page.wait_for_timeout(1000)
+                            _llm_logger.info("chatgpt_web: arrived at URL=%s title=%r", page.url, await page.title())
     
                     # Try to detect the active model before sending (UI is stable at this point)
                     try:
@@ -666,10 +694,9 @@ class ChatGPTWebEvaluator(BaseEvaluator):
                             pass
     
                 finally:
-                    if _cdp_mode:
-                        await page.close()   # close the tab we opened; keep Chrome running
-                    else:
+                    if not _cdp_mode:
                         await context.close()
+                    # CDP mode: keep the tab open for reuse on next request
 
         if not raw_text:
             raise RuntimeError("ChatGPT returned an empty response.")
