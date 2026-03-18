@@ -205,8 +205,12 @@ class EvaluationRequestBody(BaseModel):
         description="Field mapping for JSON output. All fields are auto-detected if omitted.",
     )
     max_results: int = Field(
-        default=20, ge=1, le=100,
-        description="Max results to evaluate (JSON output only).",
+        default=20, ge=1, le=500,
+        description=(
+            "Max results to evaluate (JSON output only). "
+            "For chatgpt_web, set high (e.g. 50–100) to pack more results per message "
+            "and stay within the 160 msg/3h rate limit efficiently."
+        ),
     )
     response_language: str | None = Field(
         default=None,

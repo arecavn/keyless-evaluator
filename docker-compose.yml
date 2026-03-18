@@ -1,0 +1,33 @@
+services:
+  keyless-evaluator:
+    build: .
+    image: keyless-evaluator:latest
+    container_name: keyless-evaluator
+    restart: unless-stopped
+    ports:
+      - "8511:8510"
+    env_file:
+      - .env
+    environment:
+      CHATGPT_WEB_HEADLESS: "1"
+      CHATGPT_PROFILE_DIR: /data/chatgpt-profile
+      GEMINI_PROFILE_DIR: /data/gemini-profile
+      CACHE_DIR: /data/cache
+    volumes:
+      # --- Chrome session profiles ---
+      # After logging in on Mac, rsync the profiles to the server, then switch
+      # these named volumes to bind mounts:
+      #   - /opt/keyless-eval/chatgpt-profile:/data/chatgpt-profile
+      #   - /opt/keyless-eval/gemini-profile:/data/gemini-profile
+      # See docker/README.md for the full login workflow.
+      - chatgpt-profile:/data/chatgpt-profile
+      - gemini-profile:/data/gemini-profile
+      # LLM trace logs + file cache (persisted on host)
+      - ./logs:/data/logs
+      - ./cache:/data/cache
+    # Chromium needs enough /dev/shm to avoid OOM in headless mode
+    shm_size: "512mb"
+
+volumes:
+  chatgpt-profile:
+  gemini-profile:
