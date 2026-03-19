@@ -385,7 +385,8 @@ async def _fill_contenteditable(page, locator, text: str, headless: bool) -> Non
         else:
             try:
                 subprocess.run(["xclip", "-selection", "clipboard"],
-                               input=text.encode("utf-8"), check=True)
+                               input=text.encode("utf-8"), check=True,
+                               stderr=subprocess.DEVNULL)
                 await locator.click()
                 await page.keyboard.press("Control+v")
             except (FileNotFoundError, subprocess.CalledProcessError):
