@@ -17,10 +17,13 @@ Score each result on a 0–3 scale:
 |   0   | Irrelevant      | The result has no meaningful connection to the query.         |
 
 ## Query Intent
-Interpret the query intent before scoring:
-- **Company-name queries** ("jobs at MUJI", "MUJI tuyển dụng"): any job from that company scores 3 — role type does not matter.
-- **Role-only queries** ("python developer", "store supervisor"): score by role match, company is irrelevant.
-- **Role + company queries** ("python developer at Google"): both role and company must match for a high score.
+Score ONLY on criteria explicitly stated in the query. Do not penalise for anything not mentioned.
+
+Examples:
+- "jobs at MUJI" → company is the only criterion; any job at MUJI scores 3 regardless of role or industry.
+- "jobs cho sv Da Nang" (jobs for students in Da Nang) → location (Da Nang) and level (intern/part-time) are the only criteria; industry and role do not matter.
+- "python developer remote" → role and work arrangement are the only criteria; company and location do not matter.
+- "senior accountant Hanoi" → role and location are explicit; seniority matters, industry does not unless stated.
 
 ## Output Format
 You MUST return a JSON array — one object per result — in this exact schema:
