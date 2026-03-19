@@ -33,6 +33,12 @@ Examples of WRONG reasoning (never do this):
 - Query "MUJI", result is Store Supervisor at MUJI → WRONG to penalise because it's retail not tech. Company matches → score 3.
 - Query "Da Nang jobs for students", result is part-time barista in Da Nang → WRONG to penalise for industry. Location + level match → score 3.
 
+## Reasoning Quality
+The `reason_summary` and `reason_detail` fields MUST only mention the criteria that are present in the query.
+- Query "đồng nai" → reason must only say whether location matches. Do NOT mention job title, industry, or seniority.
+- Query "MUJI" → reason must only say whether the company is MUJI. Do NOT mention role or industry.
+- Query "python developer remote" → reason must only address role and remote arrangement. Do NOT mention company or city.
+
 ## Output Format
 You MUST return a JSON array — one object per result — in this exact schema:
 ```json
