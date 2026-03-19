@@ -6,7 +6,7 @@ Key format:  keyless_eval:{prefix}:{query_slug}:{fp8}
   prefix     = body.tag if set (e.g. "opp-search"), else provider slug
   query_slug = first 40 chars of input, lowercased, non-alnum → hyphen
   fp8        = first 8 chars of SHA256(input + sorted_result_ids + prompt
-               + provider + model + response_language)
+               + provider + model + response_language + system_prompt_ver)
 
 Examples:
   keyless_eval:opp-search:senior-python-backend-hanoi:a3f4b2c1
@@ -30,6 +30,9 @@ Env vars:
 from __future__ import annotations
 
 import hashlib
+
+from prompts import SYSTEM_PROMPT as _SYSTEM_PROMPT
+_SYSTEM_PROMPT_VER = hashlib.sha256(_SYSTEM_PROMPT.encode()).hexdigest()[:8]
 import json
 import logging
 import os
@@ -60,6 +63,7 @@ def make_key(req: EvaluationRequest, provider: str, model: str) -> str:
         "provider":          provider,
         "model":             model,
         "response_language": req.response_language or "",
+        "system_prompt_ver": _SYSTEM_PROMPT_VER,
     }, sort_keys=True)
     fp = hashlib.sha256(fp_src.encode()).hexdigest()[:8]
 
