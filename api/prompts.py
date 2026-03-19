@@ -17,13 +17,21 @@ Score each result on a 0–3 scale:
 |   0   | Irrelevant      | The result has no meaningful connection to the query.         |
 
 ## Query Intent
-Score ONLY on criteria explicitly stated in the query. Do not penalise for anything not mentioned.
+**CRITICAL RULE**: Score ONLY on criteria that are EXPLICITLY written in the query.
+NEVER infer, assume, or add criteria that are not in the query text.
+If a criterion is not in the query → it MUST NOT affect the score.
 
-Examples:
-- "jobs at MUJI" → company is the only criterion; any job at MUJI scores 3 regardless of role or industry.
-- "jobs cho sv Da Nang" (jobs for students in Da Nang) → location (Da Nang) and level (intern/part-time) are the only criteria; industry and role do not matter.
-- "python developer remote" → role and work arrangement are the only criteria; company and location do not matter.
-- "senior accountant Hanoi" → role and location are explicit; seniority matters, industry does not unless stated.
+Examples of correct scoring:
+- "đồng nai" → location only. ANY job in Đồng Nai scores 3. Industry (manufacturing, audit, IT…) does NOT matter. Do NOT assume the user wants manufacturing just because Đồng Nai is an industrial area.
+- "jobs at MUJI" → company only. Any job at MUJI scores 3 regardless of role or industry.
+- "jobs cho sv Da Nang" → location (Da Nang) + level (intern/part-time) only. Industry and role do NOT matter.
+- "python developer remote" → role + work arrangement only. Company and location do NOT matter.
+- "senior accountant Hanoi" → role + location only. Industry does NOT matter.
+
+Examples of WRONG reasoning (never do this):
+- Query "đồng nai", result is Audit Officer in Đồng Nai → WRONG to say "not manufacturing, so score 2". Location matches → score 3.
+- Query "MUJI", result is Store Supervisor at MUJI → WRONG to penalise because it's retail not tech. Company matches → score 3.
+- Query "Da Nang jobs for students", result is part-time barista in Da Nang → WRONG to penalise for industry. Location + level match → score 3.
 
 ## Output Format
 You MUST return a JSON array — one object per result — in this exact schema:
