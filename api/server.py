@@ -134,6 +134,7 @@ def create_app() -> FastAPI:
         eval_request = EvaluationRequest(
             input=body.input,
             prompt=body.prompt,
+            prompt_preset=body.prompt_preset,
             results=results,
             response_language=body.response_language,
             tag=body.tag,
@@ -178,6 +179,7 @@ def create_app() -> FastAPI:
                 chunk_req = EvaluationRequest(
                     input=eval_request.input,
                     prompt=eval_request.prompt,
+                    prompt_preset=eval_request.prompt_preset,
                     query_context=eval_request.query_context,
                     results=chunk,
                     response_language=eval_request.response_language,
@@ -219,11 +221,13 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         """Liveness probe."""
+        from presets import PRESETS
         return {
             "status": "ok",
             "version": "0.2.0",
             "default_provider": "gemini",
             "providers": list(PROVIDER_MAP.keys()),
+            "prompt_presets": list(PRESETS.keys()),
             "gemini_key_set": bool(os.environ.get("GEMINI_API_KEY")),
             "openai_key_set": bool(os.environ.get("OPENAI_API_KEY")),
             "anthropic_key_set": bool(os.environ.get("ANTHROPIC_API_KEY")),

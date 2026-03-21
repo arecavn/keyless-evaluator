@@ -199,11 +199,30 @@ curl -X POST "http://127.0.0.1:8510/v1/evaluate?provider=gemini" \
 | Option | Description |
 |---|---|
 | `prompt` | Replace built-in TREC rubric with your own scoring criteria |
+| `prompt_preset` | Use a built-in prompt preset instead of writing your own (see below) |
 | `response_language` | Get reason/summary in your language (`"Vietnamese"`, `"Japanese"`, etc.) |
 | `batch_size` | Evaluate N results per LLM call (use `1` for maximum accuracy on field-rich objects) |
 | `sleep` | Jitter delay between batch calls in seconds — recommended for web providers to avoid bot detection |
 | `tag` | Short label shown at the top of Gemini/ChatGPT messages for history identification (e.g. `"job-eval"`, `"candidate-screen"`) |
 | `max_results` | Cap how many results to evaluate (default: 20) |
+
+### Prompt presets
+
+Built-in optimized prompts for specific domains. Use `prompt_preset` instead of writing a long `prompt`:
+
+| Preset | Domain | Description |
+|---|---|---|
+| `opp_search` | Vietnamese job search | Scores job results against queries with VN language mapping, structured field priority, intern/student rules, contradiction detection |
+
+```bash
+curl -X POST "http://127.0.0.1:8510/v1/evaluate?provider=chatgpt_web" \
+  -H "Content-Type: application/json" \
+  -d '{"input": "tts marketing Đà Nẵng", "prompt_preset": "opp_search", "output": {...}}'
+```
+
+Priority: `prompt` (custom) > `prompt_preset` (built-in) > default SYSTEM_PROMPT.
+
+Check available presets: `GET /health` → `prompt_presets` field.
 
 ### Sample response
 
@@ -299,6 +318,7 @@ api/
 ├── cli.py          Typer CLI — eval, detail, example, providers, login, serve
 ├── models.py       Pydantic models — RelevanceScore (0–3), SearchResult, EvaluationRequest/Response
 ├── prompts.py      LLM prompt templates — SYSTEM_PROMPT + build_user_prompt()
+├── presets.py      Built-in prompt presets for specific domains (opp_search, etc.)
 ├── parser.py       Parse LLM JSON output — fence stripping, fallback scoring
 ├── evaluators.py   Backends — GeminiEvaluator, OpenAIEvaluator, ChatGPTWebEvaluator, GeminiWebEvaluator, AnthropicEvaluator
 ├── adapter.py      Dynamic JSON adapter — dot-path resolver, auto field detection
@@ -347,6 +367,53 @@ uv run main.py             # start local server at :8510
 - **Anonymous mode** (`chatgpt_web`): opens a temporary Chrome session, no login needed
 - **Logged-in mode**: run `keyless-eval login` once to save your session, then all future calls run headless automatically
 - **Bot detection**: the evaluator uses real Chrome with stealth patches, randomized delays, and human-like jitter between requests
+
+### CDP mode — recommended for servers
+
+CDP (Chrome DevTools Protocol) connects to an already-running Chrome instead of launching a new one. This is the most reliable setup for `chatgpt_web` — WAF sees a real, already-trusted browser.
+
+**macOS:**
+
+```bash
+# 1. Open Chrome with debug port (keep this window open)
+open -na "Google Chrome" --args --user-data-dir=/tmp/chatgpt-cdp-profile --remote-debugging-port=9222
+
+# 2. In that Chrome window: go to chatgpt.com, log in, solve any WAF challenge
+
+# 3. Add to .env:
+CHATGPT_CDP_URL=http://127.0.0.1:9222
+
+# 4. Start server
+uv run main.py
+```
+
+**Headless Ubuntu server:**
+
+```bash
+# 1. Install Chrome
+wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y /tmp/chrome.deb
+
+# 2. Start headless Chrome with CDP
+google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chatgpt-cdp-profile --no-first-run --no-default-browser-check --no-sandbox --disable-gpu --headless=new &
+
+# 3. Verify
+curl http://127.0.0.1:9222/json/version
+
+# 4. Copy a logged-in profile from your Mac (headless can't log in interactively)
+# On Mac: rsync -a /tmp/chatgpt-cdp-profile/ user@server:/tmp/chatgpt-cdp-profile/
+
+# 5. Add to .env and start
+echo "CHATGPT_CDP_URL=http://127.0.0.1:9222" >> .env
+uv run main.py
+```
+
+**Ubuntu with desktop** (can log in directly):
+
+```bash
+google-chrome --user-data-dir=/tmp/chatgpt-cdp-profile --remote-debugging-port=9222 --no-first-run --no-default-browser-check
+# Log in to ChatGPT in that window, then keep it open
+```
 
 ---
 

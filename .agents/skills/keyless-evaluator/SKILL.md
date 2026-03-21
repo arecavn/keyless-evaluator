@@ -139,7 +139,17 @@ git fetch origin && git reset --hard origin/main && uv sync && sh support/restar
 
 ### CDP setup (required for chatgpt_web)
 
-Open Chrome with debug port **on the Ubuntu desktop**:
+**Headless Ubuntu server** (no display — always use single-line commands, multi-line `\` breaks in Tabby):
+```bash
+google-chrome --remote-debugging-port=9222 --user-data-dir=/tmp/chatgpt-cdp-profile --no-first-run --no-default-browser-check --no-sandbox --disable-gpu --headless=new &
+```
+
+Verify Chrome started:
+```bash
+curl http://127.0.0.1:9222/json/version
+```
+
+**Ubuntu with desktop** (to log in manually):
 ```bash
 google-chrome --user-data-dir=/tmp/chatgpt-cdp-profile --remote-debugging-port=9222 --no-first-run --no-default-browser-check
 ```
@@ -162,8 +172,9 @@ curl http://127.0.0.1:9222/json/version
 Start server:
 ```bash
 sh support/restart.sh
-# or: uv run python main.py
 ```
+
+**IMPORTANT**: Always use `sh support/restart.sh` to restart — NEVER use `pkill -f main.py` as it kills all Python main.py processes across all projects on the machine.
 
 **Notes**:
 - Default host is `0.0.0.0:8510` — accessible from network

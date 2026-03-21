@@ -102,6 +102,10 @@ class EvaluationRequest(BaseModel):
         default=None,
         description="Short label prepended to web-provider prompts for history identification.",
     )
+    prompt_preset: str | None = Field(
+        default=None,
+        description="Built-in prompt preset name (e.g. 'opp_search'). Overridden by custom prompt.",
+    )
 
 
 class EvaluationResponse(BaseModel):
@@ -198,7 +202,15 @@ class EvaluationRequestBody(BaseModel):
         description=(
             "Custom evaluation instructions — replaces the built-in scoring rubric. "
             "Describe your criteria here. Supports up to ~5 000 tokens. "
-            "If omitted, the default TREC 0–3 relevance prompt is used."
+            "If omitted, uses prompt_preset or the default TREC 0–3 relevance prompt."
+        ),
+    )
+    prompt_preset: str | None = Field(
+        default=None,
+        description=(
+            "Built-in prompt preset name. Use instead of writing a full custom prompt. "
+            "Available: 'opp_search' (Vietnamese job search auditor). "
+            "Priority: prompt (custom) > prompt_preset (built-in) > default SYSTEM_PROMPT."
         ),
     )
     mapping: FieldMapping = Field(

@@ -15,6 +15,7 @@ from models import (
     ResultScore,
 )
 from parser import parse_evaluation_response
+from presets import PRESETS
 from prompts import (
     OUTPUT_FORMAT,
     SYSTEM_PROMPT,
@@ -80,9 +81,15 @@ class BaseEvaluator(ABC):
         ...
 
     def _system_prompt(self, request: EvaluationRequest) -> str:
-        """Return the system prompt. Custom prompts get the output format spec appended."""
+        """Return the system prompt.
+
+        Priority: custom prompt > prompt_preset > default SYSTEM_PROMPT.
+        Custom prompts and presets get the output format spec appended.
+        """
         if request.prompt:
             base = request.prompt + OUTPUT_FORMAT
+        elif request.prompt_preset and request.prompt_preset in PRESETS:
+            base = PRESETS[request.prompt_preset] + OUTPUT_FORMAT
         else:
             base = SYSTEM_PROMPT
         if request.response_language:

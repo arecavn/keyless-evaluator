@@ -1,10 +1,8 @@
-"""Prompt templates for LLM evaluation."""
+"""Built-in prompt presets for specific evaluation domains."""
 
 from __future__ import annotations
-from models import EvaluationRequest
 
-
-SYSTEM_PROMPT = """\
+OPP_SEARCH = """\
 Bạn là Data Auditor tuyển dụng VN. Nhiệm vụ: chấm độ khớp giữa user query và từng job result theo thang 0-3.
 
 ## Nguyên tắc cốt lõi
@@ -38,7 +36,7 @@ Khi structured field trả lời trực tiếp một tiêu chí trong query, **c
 - Query cần có kinh nghiệm nhưng job ghi không yêu cầu kinh nghiệm
 - Query cần sinh viên/fresher nhưng job nhắm ứng viên senior/đã đi làm lâu năm
 - Query cần remote nhưng job ghi onsite
-- Query có ràng buộc tuổi trẻ/sinh viên nhưng JD yêu cầu tuổi quá cao hoặc hồ sơ quá senior
+- Query có ràng buộc tuổi trẻ/sinh viên/fresher nhưng JD yêu cầu tuổi quá cao hoặc hồ sơ quá senior
 - **EXCEPTION**: job title chứa Leader/Manager/Director/Trưởng/Giám đốc/Quản lý mà jobLevel ghi "Thực tập sinh" → title mâu thuẫn level → giảm điểm
 
 ## Soft penalty (age, lệch nhẹ)
@@ -58,68 +56,11 @@ Khi structured field trả lời trực tiếp một tiêu chí trong query, **c
 - Tập trung vào tiêu chí trong query
 - Nêu ngắn gọn các tín hiệu khớp và mâu thuẫn chính
 - KHÔNG nhắc tới tiêu chí ngoài query như một lý do trừ điểm
-
-## Output Format
-Return a JSON array — one object per result — in this exact schema:
-```json
-[
-  {
-    "result_id": "<id>",
-    "score": <0|1|2|3>,
-    "reason_summary": "<one sentence>",
-    "reason_detail": "<2-4 sentences>"
-  }
-]
-```
-Return ONLY valid JSON. No markdown fences, no extra text.\
+- Luôn viết reason_summary và reason_detail bằng Vietnamese\
 """
 
-OUTPUT_FORMAT = """
 
-## Output Format
-You MUST return a JSON array — one object per result — in this exact schema:
-```json
-[
-  {
-    "result_id": "<id>",
-    "score": <0|1|2|3>,
-    "reason_summary": "<one sentence>",
-    "reason_detail": "<2-4 sentence detailed justification>"
-  },
-  ...
-]
-```
-Return ONLY valid JSON, no markdown fences, no extra commentary."""
-
-
-def build_user_prompt(req: EvaluationRequest) -> str:
-    """Build the user-turn prompt from an evaluation request."""
-    lines: list[str] = []
-
-    lines.append(f"## Input\n{req.input}")
-
-    if req.query_context:
-        lines.append(f"\n## Context\n{req.query_context}")
-
-    lines.append("\n## Results to Evaluate")
-    for i, result in enumerate(req.results, 1):
-        lines.append(f"\n### Result {i}")
-        lines.append(f"- **ID**: {result.id}")
-        lines.append(f"- **Title**: {result.title}")
-        if result.snippet:
-            label = result.snippet_label or "Snippet"
-            lines.append(f"- **{label}**: {result.snippet}")
-        if result.url:
-            lines.append(f"- **URL**: {result.url}")
-        if result.metadata:
-            for k, v in result.metadata.items():
-                lines.append(f"- **{k.replace('_', ' ').title()}**: {v}")
-
-    lines.append(
-        "\n## Task\n"
-        "Evaluate every result above against the query. "
-        "Return a JSON array with one object per result (same order). "
-        "No explanation outside the JSON."
-    )
-
-    return "\n".join(lines)
+# Registry: name → prompt text
+PRESETS: dict[str, str] = {
+    "opp_search": OPP_SEARCH,
+}

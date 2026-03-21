@@ -60,6 +60,7 @@ def make_key(req: EvaluationRequest, provider: str, model: str) -> str:
         "input":             req.input,
         "result_ids":        sorted(str(r.id) for r in req.results),
         "prompt":            req.prompt or "",
+        "prompt_preset":     req.prompt_preset or "",
         "provider":          provider,
         "model":             model,
         "response_language": req.response_language or "",
