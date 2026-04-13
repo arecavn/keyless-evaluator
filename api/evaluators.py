@@ -1008,6 +1008,107 @@ class GeminiWebEvaluator(BaseEvaluator):
 
 
 # ---------------------------------------------------------------------------
+# Codex CLI / Claude CLI subprocess evaluator
+# ---------------------------------------------------------------------------
+
+class CLIEvaluator(BaseEvaluator):
+    """
+    Evaluate by shelling out to a CLI tool (codex exec, claude -p, etc.).
+
+    System + user prompts are concatenated and piped via stdin.
+
+    Usage:
+        provider=codex       → codex exec - --ephemeral --skip-git-repo-check -s read-only
+        provider=claude_cli  → claude -p
+    """
+
+    def __init__(
+        self,
+        executable: str = "codex",
+        args: list[str] | None = None,
+        model: str = "gpt-4o",
+        provider_name: str = "codex",
+        timeout: int = 120,
+        output_file: bool = False,
+    ):
+        self.model = model
+        self.provider = provider_name
+        self._executable = executable
+        # safe: args are fixed config strings, never built from user input
+        self._args = args if args is not None else ["exec", "-", "--ephemeral", "--skip-git-repo-check", "-s", "read-only"]
+        self._timeout = timeout
+        self._output_file = output_file  # use -o <tmpfile> to capture last agent message
+
+    async def evaluate(self, request: EvaluationRequest) -> EvaluationResponse:
+        import tempfile, os as _os
+
+        system_prompt = self._system_prompt(request)
+        user_prompt = build_user_prompt(request)
+        full_prompt = f"SYSTEM INSTRUCTIONS:\n{system_prompt}\n\n---\n\n{user_prompt}\n\nRespond with the JSON array ONLY. Do not run any shell commands."
+
+        _ensure_llm_logger()
+
+        # codex supports -o <file> to write the last agent message cleanly
+        if self._output_file:
+            tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+            tmp.close()
+            out_path = tmp.name
+            cmd = [self._executable] + self._args + ["-o", out_path]
+        else:
+            out_path = None
+            cmd = [self._executable] + self._args
+
+        _llm_logger.info("cli_eval: running %s", " ".join(cmd))
+
+        # asyncio.create_subprocess_exec — no shell, user data via stdin only
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=full_prompt.encode("utf-8")),
+                timeout=self._timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            proc.kill()
+            raise RuntimeError(f"{self._executable} CLI timed out after {self._timeout}s") from exc
+
+        import re as _re
+        err_text = stderr.decode("utf-8", errors="replace")
+
+        # Detect actual model from codex stderr header (strip ANSI codes first)
+        _ansi = _re.compile(r"\x1b\[[0-9;]*[mGKHF]")
+        err_clean = _ansi.sub("", err_text)
+        detected_model = self.model
+        m = _re.search(r"^\s*model:\s*(\S+)", err_clean, _re.MULTILINE)
+        if m:
+            detected_model = m.group(1)
+
+        # Prefer -o file content when available (cleaner than stdout which has TUI noise)
+        raw = ""
+        if out_path and _os.path.exists(out_path):
+            try:
+                with open(out_path, encoding="utf-8") as fh:
+                    raw = fh.read().strip()
+            finally:
+                _os.unlink(out_path)
+
+        if not raw:
+            raw = stdout.decode("utf-8", errors="replace").strip()
+
+        if not raw:
+            raise RuntimeError(
+                f"{self._executable} CLI returned empty output. stderr: {err_text[:400]}"
+            )
+
+        scores = parse_evaluation_response(raw, request.results)
+        return self._build_response(request, scores, raw_llm_response=raw, model_override=detected_model or None)
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
@@ -1017,6 +1118,8 @@ PROVIDER_MAP: dict[str, type[BaseEvaluator]] = {
     "chatgpt_web": ChatGPTWebEvaluator,
     "gemini_web": GeminiWebEvaluator,
     "anthropic": AnthropicEvaluator,
+    "codex": CLIEvaluator,
+    "claude_cli": CLIEvaluator,
 }
 
 _DEFAULT_MODELS: dict[str, str] = {
@@ -1025,6 +1128,28 @@ _DEFAULT_MODELS: dict[str, str] = {
     "chatgpt_web": "auto",
     "gemini_web": "auto",
     "anthropic": "claude-3-5-haiku-20241022",
+    "codex": "gpt-5.4",  # ChatGPT Plus default; override with ?model= if needed
+    "claude_cli": "claude-opus-4-6",
+}
+
+
+_CLI_PROVIDER_DEFAULTS: dict[str, dict] = {
+    "codex": {
+        "executable": "codex",
+        # codex exec reads stdin when first positional arg is "-"
+        # --ephemeral: don't persist session; --skip-git-repo-check: run anywhere
+        # -s read-only: sandbox so agent can't write files
+        "args": ["exec", "-", "--ephemeral", "--skip-git-repo-check", "-s", "read-only", "-c", "model_reasoning_effort=low"],
+        "provider_name": "codex",
+        "output_file": True,   # use -o <tmpfile> to capture final agent message
+        "timeout": 300,        # gpt-5.4 can take 2-3 min on large payloads
+    },
+    "claude_cli": {
+        "executable": "claude",
+        "args": ["-p"],
+        "provider_name": "claude_cli",
+        "output_file": False,
+    },
 }
 
 
@@ -1037,9 +1162,20 @@ def get_evaluator(provider: str, model: str | None = None, **kwargs) -> BaseEval
         get_evaluator("chatgpt_web")
         get_evaluator("openai", model="gpt-4o")
         get_evaluator("anthropic", model="claude-opus-4-5")
+        get_evaluator("codex")
+        get_evaluator("claude_cli")
     """
     key = provider.lower()
     cls = PROVIDER_MAP.get(key)
     if cls is None:
         raise ValueError(f"Unknown provider '{provider}'. Choose from: {', '.join(PROVIDER_MAP)}")
+    if key in _CLI_PROVIDER_DEFAULTS:
+        resolved_model = model or _DEFAULT_MODELS.get(key, "")
+        cli_kwargs = dict(_CLI_PROVIDER_DEFAULTS[key])
+        cli_kwargs["model"] = resolved_model
+        # only inject -m when a non-default model is explicitly requested
+        if key == "codex" and model:
+            cli_kwargs["args"] = list(cli_kwargs["args"]) + ["-m", model]
+        cli_kwargs.update(kwargs)
+        return cls(**cli_kwargs)
     return cls(model=model or _DEFAULT_MODELS[key], **kwargs)
