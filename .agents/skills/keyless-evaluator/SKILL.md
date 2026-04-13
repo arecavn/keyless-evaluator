@@ -2,10 +2,11 @@
 name: keyless-evaluator
 description: >
   LLM-as-judge search result evaluator. Scores search results 0-3 (Irrelevant → Highly Relevant)
-  using Gemini, OpenAI, Anthropic, or anonymous ChatGPT Web. Runs with `uv run`.
+  using Gemini, OpenAI, Anthropic, ChatGPT Web, Codex CLI, or Claude CLI. Runs with `uv run`.
   Supports standard {id, title, snippet} input AND dynamic raw JSON from any search API via
-  /v1/evaluate/raw with auto field detection. Use this skill when: evaluating search quality,
+  /v1/evaluate with auto field detection. Use this skill when: evaluating search quality,
   running LLM-as-judge scoring, ranking results, computing nDCG, or integrating the REST API.
+  For speed-sensitive use: prefer claude_cli (~3s) or codex (~5–10s) over browser providers.
 ---
 
 # Keyless Evaluator — Agent Skill
@@ -44,7 +45,8 @@ keyless_evaluator/
 ├── prompts.py      # SYSTEM_PROMPT + build_user_prompt
 ├── parser.py       # Parse raw LLM JSON → list[ResultScore], robust fence stripping
 ├── evaluators.py   # Backends: GeminiEvaluator, OpenAIEvaluator, AnthropicEvaluator,
-│                   #           ChatGPTWebEvaluator + factory get_evaluator()
+│                   #           ChatGPTWebEvaluator, GeminiWebEvaluator,
+│                   #           CLIEvaluator (codex + claude_cli) + factory get_evaluator()
 ├── adapter.py      # Dynamic raw JSON adapter: dot-path resolver, auto field detection
 ├── renderer.py     # Rich terminal: tables, detail panels, nDCG stats
 └── server.py       # FastAPI: POST /v1/evaluate, POST /v1/evaluate/raw, GET /health
@@ -52,12 +54,50 @@ keyless_evaluator/
 
 ## Providers
 
-| Provider | Key Needed | Default Model | Notes |
-|---|---|---|---|
-| `gemini` *(default)* | `GEMINI_API_KEY` | `gemini-2.0-flash` | Free 1500 req/day |
-| `chatgpt_web` | None | `auto` | Anonymous ChatGPT via Playwright |
-| `openai` | `OPENAI_API_KEY` | `gpt-4o` | OpenAI API |
-| `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-haiku-20241022` | Anthropic Claude |
+| Provider | Key/CLI Needed | Default Model | Speed | Notes |
+|---|---|---|---|---|
+| `gemini` *(default)* | `GEMINI_API_KEY` | `gemini-2.0-flash` | ⚡ ~0.5–2s | Free 1500 req/day |
+| `claude_cli` | `claude` CLI | `claude-opus-4-6` | ⚡ ~3s | Claude Code pipe mode — fastest no-key option |
+| `codex` | `codex` CLI + ChatGPT Plus | `gpt-5.4` | 🟡 ~5–10s | OpenAI Codex CLI; use `gpt-5.4-mini` for ~3.7s |
+| `openai` | `OPENAI_API_KEY` | `gpt-4o` | ⚡ ~2s | OpenAI API |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-haiku-20241022` | ⚡ ~2s | Anthropic Claude |
+| `chatgpt_web` | None | `auto` | 🐢 4–6 min | Browser automation — last resort only |
+| `gemini_web` | Google login | `auto` | 🐢 1–2 min | Browser automation — last resort only |
+
+### Speed order
+```
+gemini API (~0.5s) > claude_cli (~3s) > codex (~5–10s) > gemini_web (~1–2 min) > chatgpt_web (4–6 min)
+```
+Always prefer API or CLI providers over browser automation (`chatgpt_web`, `gemini_web`).
+
+### CLI provider setup
+
+**`claude_cli`** — pipe mode via [Claude Code](https://claude.ai/code):
+```bash
+npm install -g @anthropic-ai/claude-code
+# authenticated automatically if you use Claude Code
+```
+
+**`codex`** — [OpenAI Codex CLI](https://github.com/openai/codex) with ChatGPT Plus:
+```bash
+npm install -g @openai/codex
+codex login   # authenticate with ChatGPT Plus account
+```
+
+Use `gpt-5.4-mini` for faster responses (~3.7s), or omit `model` for the default `gpt-5.4` (~5–10s).
+The provider always uses `model_reasoning_effort=low` — sufficient for 0–3 scoring tasks.
+
+```bash
+# Fast codex eval
+curl -X POST "http://localhost:8510/v1/evaluate?provider=codex&model=gpt-5.4-mini" \
+  -H "Content-Type: application/json" \
+  -d '{"input": "senior python backend hanoi", "output": {...}}'
+
+# claude_cli eval
+curl -X POST "http://localhost:8510/v1/evaluate?provider=claude_cli" \
+  -H "Content-Type: application/json" \
+  -d '{"input": "senior python backend hanoi", "output": {...}}'
+```
 
 ## API Endpoints
 

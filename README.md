@@ -18,9 +18,11 @@ Most LLM evaluation tools force you to create a new API key, set up billing, and
 
 | If you have... | Use provider | Extra cost |
 |---|---|---|
-| A ChatGPT Plus/Free account | `chatgpt_web` | **$0 extra** |
-| A Gemini Advanced/Free account | `gemini_web` | **$0 extra** |
-| A Google AI Studio key (free) | `gemini` | **$0** — 1500 req/day free |
+| A ChatGPT Plus account + Codex CLI | `codex` | **$0 extra** — ~5–10s/eval |
+| Claude Code / Claude Max | `claude_cli` | **$0 extra** — ~3s/eval |
+| A Google AI Studio key (free) | `gemini` | **$0** — 1500 req/day, ~0.5s/eval |
+| A ChatGPT Plus/Free account | `chatgpt_web` | **$0 extra** — browser only, slow |
+| A Gemini Advanced/Free account | `gemini_web` | **$0 extra** — browser only, slow |
 | An OpenAI API key | `openai` | Pay-per-token |
 | An Anthropic API key | `anthropic` | Pay-per-token |
 
@@ -79,13 +81,41 @@ uv run keyless-eval eval -q "python async web framework" -f example_results.json
 
 ## 🚀 Providers
 
-| Provider | Model | Auth | Cost | Notes |
-|---|---|---|---|---|
-| `gemini` *(default)* | `gemini-2.0-flash` | `GEMINI_API_KEY` | **Free** 1500 req/day | Get key at [Google AI Studio](https://aistudio.google.com/apikey) |
-| `chatgpt_web` | auto-detected | None / ChatGPT login | **$0 extra** | Anonymous or logged-in. Uses your existing ChatGPT account. |
-| `gemini_web` | auto-detected | Google login | **$0 extra** | Uses your existing Google/Gemini account. |
-| `openai` | `gpt-4o` | `OPENAI_API_KEY` | Pay-per-token | Direct OpenAI API |
-| `anthropic` | `claude-3-5-haiku-20241022` | `ANTHROPIC_API_KEY` | Pay-per-token | Anthropic Claude API |
+| Provider | Model | Auth | Speed | Cost | Notes |
+|---|---|---|---|---|---|
+| `gemini` *(default)* | `gemini-2.0-flash` | `GEMINI_API_KEY` | ⚡ ~0.5–2s | **Free** 1500 req/day | Get key at [Google AI Studio](https://aistudio.google.com/apikey) |
+| `claude_cli` | `claude-opus-4-6` | Claude Code CLI | ⚡ ~3s | Included w/ subscription | Requires `claude` CLI installed |
+| `codex` | `gpt-5.4` | Codex CLI / ChatGPT Plus | 🟡 ~5–10s | Included w/ ChatGPT Plus | Requires `codex` CLI installed |
+| `chatgpt_web` | auto-detected | None / ChatGPT login | 🐢 4–6 min | **$0 extra** | Browser automation via Playwright |
+| `gemini_web` | auto-detected | Google login | 🐢 1–2 min | **$0 extra** | Browser automation via Playwright |
+| `openai` | `gpt-4o` | `OPENAI_API_KEY` | ⚡ ~2s | Pay-per-token | Direct OpenAI API |
+| `anthropic` | `claude-3-5-haiku-20241022` | `ANTHROPIC_API_KEY` | ⚡ ~2s | Pay-per-token | Anthropic Claude API |
+
+### Speed guide — choose the right provider
+
+```
+⚡ Fastest:  gemini (free API key, ~0.5s) → claude_cli (~3s) → codex (~5s)
+🐢 Slowest:  chatgpt_web (browser, 4–6 min) — use only when no key/CLI available
+```
+
+Use `chatgpt_web` / `gemini_web` only as a **last resort** (no keys, no CLI). For regular use, `claude_cli` or `codex` are 50–100× faster with zero browser overhead.
+
+### CLI provider setup
+
+**`claude_cli`** — uses [Claude Code](https://claude.ai/code) CLI in pipe mode:
+```bash
+# Install Claude Code CLI
+npm install -g @anthropic-ai/claude-code   # or download from claude.ai/code
+# Already authenticated if you use Claude Code
+```
+
+**`codex`** — uses [OpenAI Codex CLI](https://github.com/openai/codex) with your ChatGPT Plus account:
+```bash
+# Install Codex CLI
+npm install -g @openai/codex
+# Authenticate (opens browser)
+codex login
+```
 
 ### Model overrides
 
@@ -98,6 +128,10 @@ uv run keyless-eval eval -q "..." -f results.json -p gemini -m gemini-2.0-flash
 uv run keyless-eval eval -q "..." -f results.json -p gemini_web -m pro
 uv run keyless-eval eval -q "..." -f results.json -p gemini_web -m fast
 uv run keyless-eval eval -q "..." -f results.json -p gemini_web -m thinking
+
+# codex — use mini model for faster responses (~3.7s vs ~5.8s)
+uv run keyless-eval eval -q "..." -f results.json -p codex -m gpt-5.4-mini
+# (uses low reasoning effort by default — sufficient for scoring tasks)
 
 # OpenAI
 uv run keyless-eval eval -q "..." -f results.json -p openai -m gpt-4o-mini
@@ -272,7 +306,7 @@ keyless-eval serve       Start the FastAPI HTTP server
 |------|-------|-------------|
 | `--input` | `-q` | Search query / evaluation criterion (required) |
 | `--file` | `-f` | JSON results file (or pipe via stdin) |
-| `--provider` | `-p` | `gemini` \| `chatgpt_web` \| `gemini_web` \| `openai` \| `anthropic` |
+| `--provider` | `-p` | `gemini` \| `claude_cli` \| `codex` \| `chatgpt_web` \| `gemini_web` \| `openai` \| `anthropic` |
 | `--model` | `-m` | Model override (e.g. `pro`, `thinking`, `gpt-4o-mini`) |
 | `--tag` | `-t` | Label for web-provider chat history (e.g. `job-eval`, `screening`) |
 | `--detail` | `-d` | Show detailed reasoning panels per result |
@@ -320,7 +354,7 @@ api/
 ├── prompts.py      LLM prompt templates — SYSTEM_PROMPT + build_user_prompt()
 ├── presets.py      Built-in prompt presets for specific domains (opp_search, etc.)
 ├── parser.py       Parse LLM JSON output — fence stripping, fallback scoring
-├── evaluators.py   Backends — GeminiEvaluator, OpenAIEvaluator, ChatGPTWebEvaluator, GeminiWebEvaluator, AnthropicEvaluator
+├── evaluators.py   Backends — GeminiEvaluator, OpenAIEvaluator, ChatGPTWebEvaluator, GeminiWebEvaluator, AnthropicEvaluator, CLIEvaluator (codex/claude_cli)
 ├── adapter.py      Dynamic JSON adapter — dot-path resolver, auto field detection
 ├── renderer.py     Rich terminal output — tables, detail panels, nDCG stats
 └── server.py       FastAPI REST API — POST /v1/evaluate, GET /health

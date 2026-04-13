@@ -59,7 +59,8 @@ Agent skill files (for Claude Code / Antigravity):
 
 - **Relevance Scale**: 0 = Irrelevant, 1 = Marginal, 2 = Relevant, 3 = Highly Relevant (TREC-style)
 - **Output Schema**: Each result gets `{result_id, score, reason_summary, reason_detail}` in JSON
-- **Providers**: `gemini` (default, free API key), `chatgpt_web` (no key), `openai`, `anthropic`
+- **Providers**: `gemini` (default, free API key), `claude_cli` (~3s, uses Claude Code CLI), `codex` (~5–10s, uses Codex CLI + ChatGPT Plus), `chatgpt_web` (browser automation, slow), `openai`, `anthropic`
+- **Speed order**: `gemini` API (~0.5s) > `claude_cli` (~3s) > `codex` (~5–10s) > `gemini_web` (~1–2 min) > `chatgpt_web` (4–6 min) — always prefer API/CLI over browser
 - **Fast**: No complex Node.js/npx dependencies
 - **nDCG**: Auto-computed on every evaluation response
 - **All async**: Evaluators are `async def evaluate(...)` — run via `asyncio.run()` in CLI
