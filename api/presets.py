@@ -28,26 +28,28 @@ Khi structured field trả lời trực tiếp một tiêu chí trong query, **c
 - `jobLevel = "Thực tập sinh"` + query tìm intern/sv/tts → **khớp mạnh** cho tiêu chí level
 
 ## Lịch làm việc — chỉ xét khi query đề cập
-**Working Days / lịch ca / thứ 7 / chủ nhật hoàn toàn bị BỎ QUA** trừ khi query có đề cập rõ ràng về lịch làm việc (ví dụ: "nghỉ thứ 7", "không ca đêm", "Mon-Fri only", "làm thứ 7", v.v.).
-- `Working Days: Mon-Sat` hoặc `workingDays: "1,2,3,4,5,6"` khi query KHÔNG đề cập lịch → **không ảnh hưởng điểm**
-- `Working Days: Mon-Fri` hoặc `workingDays: "1,2,3,4,5"` khi query KHÔNG đề cập lịch → **bỏ qua hoàn toàn**
-- Chỉ khi query nêu ràng buộc lịch cụ thể thì mới áp dụng structured field này
+**Working Days / lịch ca / thứ 7 / chủ nhật hoàn toàn bị BỎ QUA** trừ khi query có đề cập rõ ràng về lịch làm việc.
 
 ### Bảng mã ngày làm việc (numeric workingDays)
-Khi `workingDays` là chuỗi số, áp dụng bảng sau:
 | Số | Ngày |
 |----|------|
-| 1  | Thứ 2 (Monday) |
-| 2  | Thứ 3 (Tuesday) |
-| 3  | Thứ 4 (Wednesday) |
-| 4  | Thứ 5 (Thursday) |
-| 5  | Thứ 6 (Friday) |
-| 6  | Thứ 7 (Saturday) |
-| 7  | Chủ nhật (Sunday) |
+| 1  | Thứ 2 | 2 | Thứ 3 | 3 | Thứ 4 | 4 | Thứ 5 | 5 | Thứ 6 | **6** | **Thứ 7 (Saturday)** | 7 | Chủ nhật |
 
-Ví dụ: `workingDays: "1,2,3,4,5,6"` = làm từ Thứ 2 đến Thứ 7 (có làm thứ 7).
-- Query "làm t7" / "có thứ 7" / "làm thứ 7" + `workingDays` chứa `6` → **khớp mạnh**
-- Query "nghỉ t7" / "không làm thứ 7" / "Mon-Fri" + `workingDays` chứa `6` → **mâu thuẫn**, trừ điểm
+`workingDays: "1,2,3,4,5,6"` = có làm **Thứ 7**. `workingDays: "1,2,3,4,5"` = chỉ Thứ 2–6.
+
+### Quy tắc cứng — PHẢI áp dụng nhất quán cho MỌI job trong batch
+
+**Query "làm t7" / "có thứ 7" / "làm thứ 7" / "t7":**
+- Job có `workingOnWeekend: true` HOẶC `workingDays` chứa `"6"` → tiêu chí lịch **ĐÃ THỎA**, KHÔNG trừ điểm vì lịch
+- Job có `workingOnWeekend: false` HOẶC `workingDays` KHÔNG chứa `"6"` → **mâu thuẫn trực tiếp**, trừ điểm mạnh
+
+**Query "nghỉ t7" / "không làm thứ 7" / "Mon-Fri":**
+- Job có `workingOnWeekend: true` HOẶC `workingDays` chứa `"6"` → **mâu thuẫn**, trừ điểm mạnh
+- Job có `workingOnWeekend: false` HOẶC `workingDays: "1,2,3,4,5"` → tiêu chí lịch **ĐÃ THỎA**
+
+**Khi query KHÔNG đề cập lịch:** bỏ qua hoàn toàn mọi field về ngày làm việc.
+
+> **QUAN TRỌNG**: Nếu hai job có cùng `workingDays` và `workingOnWeekend`, điểm lịch của chúng PHẢI giống nhau. Không được cho job A score=3 và job B score=0 khi cả hai đều có `workingOnWeekend: true`.
 
 **"Đi Làm Ngay" / "Tuyển Gấp" / urgency tag** trong job title hay snippet → là nhãn đăng tin, **không liên quan đến độ khớp**, bỏ qua hoàn toàn khi chấm điểm.
 
