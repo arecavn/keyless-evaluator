@@ -92,6 +92,8 @@ You MUST return a JSON array — one object per result — in this exact schema:
 Return ONLY valid JSON, no markdown fences, no extra commentary."""
 
 
+PROMPT_BUILDER_VER = "3"  # bump when build_user_prompt changes structurally
+
 _WORKING_DAY_MAP = {
     "1": "Thứ 2", "2": "Thứ 3", "3": "Thứ 4",
     "4": "Thứ 5", "5": "Thứ 6", "6": "Thứ 7", "7": "Chủ nhật",
@@ -109,6 +111,16 @@ def _render_metadata_value(key: str, val: object) -> str:
     return str(val)
 
 
+# Metadata keys rendered BEFORE the snippet — must be seen before long text
+_HOIST_KEYS = frozenset({
+    "workingdays", "workingonweekend", "workingarrangement", "workingtohour",
+    "weekendwork", "workingdays_en",
+    "joblevel", "joblevel_en", "employmenttype", "employmenttype_en",
+    "location", "city", "province",
+    "salary", "salaryrange",
+})
+
+
 def build_user_prompt(req: EvaluationRequest) -> str:
     """Build the user-turn prompt from an evaluation request."""
     lines: list[str] = []
@@ -123,6 +135,15 @@ def build_user_prompt(req: EvaluationRequest) -> str:
         lines.append(f"\n### Result {i}")
         lines.append(f"- **ID**: {result.id}")
         lines.append(f"- **Title**: {result.title}")
+
+        # Hoist priority structured fields BEFORE the snippet so they are read first
+        if result.metadata:
+            for k, v in result.metadata.items():
+                if k.lower().replace("_", "") in _HOIST_KEYS:
+                    rendered = _render_metadata_value(k, v)
+                    if rendered and rendered not in ("", "None", "null"):
+                        lines.append(f"- **{k.replace('_', ' ').title()}**: {rendered}")
+
         if result.snippet:
             label = result.snippet_label or "Snippet"
             lines.append(f"- **{label}**: {result.snippet}")
@@ -130,7 +151,8 @@ def build_user_prompt(req: EvaluationRequest) -> str:
             lines.append(f"- **URL**: {result.url}")
         if result.metadata:
             for k, v in result.metadata.items():
-                lines.append(f"- **{k.replace('_', ' ').title()}**: {_render_metadata_value(k, v)}")
+                if k.lower().replace("_", "") not in _HOIST_KEYS:
+                    lines.append(f"- **{k.replace('_', ' ').title()}**: {_render_metadata_value(k, v)}")
 
     lines.append(
         "\n## Task\n"

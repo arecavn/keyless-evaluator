@@ -36,7 +36,7 @@ import os
 import re
 import time
 
-from prompts import SYSTEM_PROMPT as _SYSTEM_PROMPT
+from prompts import SYSTEM_PROMPT as _SYSTEM_PROMPT, PROMPT_BUILDER_VER as _PROMPT_BUILDER_VER
 from presets import PRESETS as _PRESETS
 _SYSTEM_PROMPT_VER = hashlib.sha256(_SYSTEM_PROMPT.encode()).hexdigest()[:8]
 _PRESETS_VER = hashlib.sha256(json.dumps(_PRESETS, sort_keys=True).encode()).hexdigest()[:8]
@@ -66,8 +66,9 @@ def make_key(req: EvaluationRequest, provider: str, model: str) -> str:
         "provider":          provider,
         "model":             model,
         "response_language": req.response_language or "",
-        "system_prompt_ver": _SYSTEM_PROMPT_VER,
-        "presets_ver":       _PRESETS_VER,
+        "system_prompt_ver":    _SYSTEM_PROMPT_VER,
+        "presets_ver":          _PRESETS_VER,
+        "prompt_builder_ver":   _PROMPT_BUILDER_VER,
     }, sort_keys=True)
     fp = hashlib.sha256(fp_src.encode()).hexdigest()[:8]
 
