@@ -30,14 +30,16 @@ Env vars:
 from __future__ import annotations
 
 import hashlib
-
-from prompts import SYSTEM_PROMPT as _SYSTEM_PROMPT
-_SYSTEM_PROMPT_VER = hashlib.sha256(_SYSTEM_PROMPT.encode()).hexdigest()[:8]
 import json
 import logging
 import os
 import re
 import time
+
+from prompts import SYSTEM_PROMPT as _SYSTEM_PROMPT
+from presets import PRESETS as _PRESETS
+_SYSTEM_PROMPT_VER = hashlib.sha256(_SYSTEM_PROMPT.encode()).hexdigest()[:8]
+_PRESETS_VER = hashlib.sha256(json.dumps(_PRESETS, sort_keys=True).encode()).hexdigest()[:8]
 
 from models import EvaluationRequest, EvaluationResponse
 
@@ -65,6 +67,7 @@ def make_key(req: EvaluationRequest, provider: str, model: str) -> str:
         "model":             model,
         "response_language": req.response_language or "",
         "system_prompt_ver": _SYSTEM_PROMPT_VER,
+        "presets_ver":       _PRESETS_VER,
     }, sort_keys=True)
     fp = hashlib.sha256(fp_src.encode()).hexdigest()[:8]
 
