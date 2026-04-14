@@ -92,6 +92,23 @@ You MUST return a JSON array — one object per result — in this exact schema:
 Return ONLY valid JSON, no markdown fences, no extra commentary."""
 
 
+_WORKING_DAY_MAP = {
+    "1": "Thứ 2", "2": "Thứ 3", "3": "Thứ 4",
+    "4": "Thứ 5", "5": "Thứ 6", "6": "Thứ 7", "7": "Chủ nhật",
+}
+
+
+def _render_metadata_value(key: str, val: object) -> str:
+    """Convert known structured fields to human-readable form before passing to LLM."""
+    k = key.lower().replace("_", "")
+    if k == "workingdays":
+        parts = [p.strip() for p in str(val).split(",") if p.strip()]
+        names = [_WORKING_DAY_MAP.get(p, p) for p in parts]
+        note = " ✅ có làm Thứ 7" if "6" in parts else (" ✅ chỉ Thứ 2–Thứ 6" if parts else "")
+        return ", ".join(names) + note
+    return str(val)
+
+
 def build_user_prompt(req: EvaluationRequest) -> str:
     """Build the user-turn prompt from an evaluation request."""
     lines: list[str] = []
@@ -113,7 +130,7 @@ def build_user_prompt(req: EvaluationRequest) -> str:
             lines.append(f"- **URL**: {result.url}")
         if result.metadata:
             for k, v in result.metadata.items():
-                lines.append(f"- **{k.replace('_', ' ').title()}**: {v}")
+                lines.append(f"- **{k.replace('_', ' ').title()}**: {_render_metadata_value(k, v)}")
 
     lines.append(
         "\n## Task\n"
