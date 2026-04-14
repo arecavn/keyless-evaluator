@@ -92,7 +92,7 @@ You MUST return a JSON array — one object per result — in this exact schema:
 Return ONLY valid JSON, no markdown fences, no extra commentary."""
 
 
-PROMPT_BUILDER_VER = "3"  # bump when build_user_prompt changes structurally
+PROMPT_BUILDER_VER = "4"  # bump when build_user_prompt changes structurally
 
 _WORKING_DAY_MAP = {
     "1": "Thứ 2", "2": "Thứ 3", "3": "Thứ 4",
@@ -106,7 +106,8 @@ def _render_metadata_value(key: str, val: object) -> str:
     if k == "workingdays":
         parts = [p.strip() for p in str(val).split(",") if p.strip()]
         names = [_WORKING_DAY_MAP.get(p, p) for p in parts]
-        note = " ✅ có làm Thứ 7" if "6" in parts else (" ✅ chỉ Thứ 2–Thứ 6" if parts else "")
+        # Neutral note — LLM must still cross-check with title for contradictions
+        note = " (bao gồm Thứ 7)" if "6" in parts else ""
         return ", ".join(names) + note
     return str(val)
 

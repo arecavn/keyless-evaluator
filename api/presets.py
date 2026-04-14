@@ -53,6 +53,11 @@ Khi structured field trả lời trực tiếp một tiêu chí trong query, **c
 
 **"Đi Làm Ngay" / "Tuyển Gấp" / urgency tag** trong job title hay snippet → là nhãn đăng tin, **không liên quan đến độ khớp**, bỏ qua hoàn toàn khi chấm điểm.
 
+**Mâu thuẫn title vs structured field — title thắng:**
+Khi title ghi rõ "Nghỉ T7", "Nghỉ CN", "Thứ 2–Thứ 6", "Mon–Fri" thì **title là tín hiệu chính xác nhất**, dù `workingDays` nói khác đi (lỗi dữ liệu API). Ví dụ:
+- Title "Nghỉ T7 & CN" + `workingDays` chứa "6" → KHÔNG làm thứ 7, score 0 cho query "làm t7"
+- Title "Làm thứ 7" + `workingDays` chứa "6" → cả hai đồng thuận, khớp mạnh
+
 ## Heuristic nhanh
 - **Title khớp trực tiếp** với ý định chính → thường là **3**
 - **Title lệch hẳn** → thường là **0** hoặc **1**, trừ khi field khác cho thấy vẫn liên quan một phần
