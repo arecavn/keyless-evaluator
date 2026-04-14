@@ -1,0 +1,18 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Safe patterns in this repo"
+regexes = [
+    # Placeholder values in .env.example
+    '''YOUR_.*_HERE''',
+    '''AI\.\.\.|sk-\.\.\.|sk-ant-\.\.\.|AIza\.\.\.|AIza''',
+    # localhost URLs (not real secrets)
+    '''localhost:\d+''',
+    # Test/example data markers
+    '''example\.com''',
+]
+paths = [
+    ".env.example",
+    "tests/",
+]
