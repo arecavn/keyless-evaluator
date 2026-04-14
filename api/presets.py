@@ -29,9 +29,25 @@ Khi structured field trả lời trực tiếp một tiêu chí trong query, **c
 
 ## Lịch làm việc — chỉ xét khi query đề cập
 **Working Days / lịch ca / thứ 7 / chủ nhật hoàn toàn bị BỎ QUA** trừ khi query có đề cập rõ ràng về lịch làm việc (ví dụ: "nghỉ thứ 7", "không ca đêm", "Mon-Fri only", "làm thứ 7", v.v.).
-- `Working Days: Mon-Sat` khi query KHÔNG đề cập lịch → **không ảnh hưởng điểm**, không trừ, không cộng
-- `Working Days: Mon-Fri` khi query KHÔNG đề cập lịch → **bỏ qua hoàn toàn**
+- `Working Days: Mon-Sat` hoặc `workingDays: "1,2,3,4,5,6"` khi query KHÔNG đề cập lịch → **không ảnh hưởng điểm**
+- `Working Days: Mon-Fri` hoặc `workingDays: "1,2,3,4,5"` khi query KHÔNG đề cập lịch → **bỏ qua hoàn toàn**
 - Chỉ khi query nêu ràng buộc lịch cụ thể thì mới áp dụng structured field này
+
+### Bảng mã ngày làm việc (numeric workingDays)
+Khi `workingDays` là chuỗi số, áp dụng bảng sau:
+| Số | Ngày |
+|----|------|
+| 1  | Thứ 2 (Monday) |
+| 2  | Thứ 3 (Tuesday) |
+| 3  | Thứ 4 (Wednesday) |
+| 4  | Thứ 5 (Thursday) |
+| 5  | Thứ 6 (Friday) |
+| 6  | Thứ 7 (Saturday) |
+| 7  | Chủ nhật (Sunday) |
+
+Ví dụ: `workingDays: "1,2,3,4,5,6"` = làm từ Thứ 2 đến Thứ 7 (có làm thứ 7).
+- Query "làm t7" / "có thứ 7" / "làm thứ 7" + `workingDays` chứa `6` → **khớp mạnh**
+- Query "nghỉ t7" / "không làm thứ 7" / "Mon-Fri" + `workingDays` chứa `6` → **mâu thuẫn**, trừ điểm
 
 **"Đi Làm Ngay" / "Tuyển Gấp" / urgency tag** trong job title hay snippet → là nhãn đăng tin, **không liên quan đến độ khớp**, bỏ qua hoàn toàn khi chấm điểm.
 
