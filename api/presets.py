@@ -27,16 +27,26 @@ Khi structured field trả lời trực tiếp một tiêu chí trong query, **c
 - `Weekend Work: No` hoặc `Working Days: Mon-Fri` + query yêu cầu nghỉ thứ bảy → **khớp hoàn toàn** — KHÔNG nói "không nêu rõ trong mô tả"
 - `jobLevel = "Thực tập sinh"` + query tìm intern/sv/tts → **khớp mạnh** cho tiêu chí level
 
+## Lịch làm việc — chỉ xét khi query đề cập
+**Working Days / lịch ca / thứ 7 / chủ nhật hoàn toàn bị BỎ QUA** trừ khi query có đề cập rõ ràng về lịch làm việc (ví dụ: "nghỉ thứ 7", "không ca đêm", "Mon-Fri only", "làm thứ 7", v.v.).
+- `Working Days: Mon-Sat` khi query KHÔNG đề cập lịch → **không ảnh hưởng điểm**, không trừ, không cộng
+- `Working Days: Mon-Fri` khi query KHÔNG đề cập lịch → **bỏ qua hoàn toàn**
+- Chỉ khi query nêu ràng buộc lịch cụ thể thì mới áp dụng structured field này
+
+**"Đi Làm Ngay" / "Tuyển Gấp" / urgency tag** trong job title hay snippet → là nhãn đăng tin, **không liên quan đến độ khớp**, bỏ qua hoàn toàn khi chấm điểm.
+
 ## Heuristic nhanh
 - **Title khớp trực tiếp** với ý định chính → thường là **3**
 - **Title lệch hẳn** → thường là **0** hoặc **1**, trừ khi field khác cho thấy vẫn liên quan một phần
 - Query chỉ nêu field (ví dụ "marketing"), bất kỳ job title nào trong field đó đều là khớp đầy đủ — KHÔNG trừ điểm vì chuyên ngành con (trade marketing, social media, content marketing, v.v.)
 
 ## Phát hiện mâu thuẫn — trừ điểm nhanh
+Chỉ trừ điểm khi **query nêu rõ ràng** tiêu chí đó và job vi phạm trực tiếp:
 - Query cần có kinh nghiệm nhưng job ghi không yêu cầu kinh nghiệm
 - Query cần sinh viên/fresher nhưng job nhắm ứng viên senior/đã đi làm lâu năm
-- Query cần remote nhưng job ghi onsite
+- Query cần remote nhưng job ghi onsite (và ngược lại)
 - Query có ràng buộc tuổi trẻ/sinh viên/fresher nhưng JD yêu cầu tuổi quá cao hoặc hồ sơ quá senior
+- Query yêu cầu nghỉ thứ 7 nhưng `Working Days` bao gồm thứ 7 (và ngược lại — chỉ khi query đề cập)
 - **EXCEPTION**: job title chứa Leader/Manager/Director/Trưởng/Giám đốc/Quản lý mà jobLevel ghi "Thực tập sinh" → title mâu thuẫn level → giảm điểm
 
 ## Soft penalty (age, lệch nhẹ)
